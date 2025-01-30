@@ -1,10 +1,10 @@
 include("script/campaign/libcampaign.js");
 include("script/campaign/templates.js");
 
-const COLLECTIVE_RES = [
-	"R-Defense-WallUpgrade06", "R-Struc-Materials06", "R-Sys-Engineering02",
-	"R-Vehicle-Engine04", "R-Vehicle-Metals05", "R-Cyborg-Metals05",
-	"R-Wpn-Cannon-Accuracy02", "R-Wpn-Cannon-Damage05","R-Wpn-Cannon-ROF02",
+const mis_collectiveRes = [
+	"R-Defense-WallUpgrade05", "R-Struc-Materials06", "R-Sys-Engineering02",
+	"R-Vehicle-Engine05", "R-Vehicle-Metals05", "R-Cyborg-Metals05",
+	"R-Wpn-Cannon-Accuracy02", "R-Wpn-Cannon-Damage05", "R-Wpn-Cannon-ROF02",
 	"R-Wpn-Flamer-Damage06", "R-Wpn-Flamer-ROF03", "R-Wpn-MG-Damage07",
 	"R-Wpn-MG-ROF03", "R-Wpn-Mortar-Acc02", "R-Wpn-Mortar-Damage06",
 	"R-Wpn-Mortar-ROF03", "R-Wpn-Rocket-Accuracy02", "R-Wpn-Rocket-Damage06",
@@ -13,6 +13,18 @@ const COLLECTIVE_RES = [
 	"R-Wpn-Howitzer-Damage08", "R-Cyborg-Armor-Heat01", "R-Vehicle-Armor-Heat01",
 	"R-Wpn-Bomb-Damage02", "R-Wpn-AAGun-Damage03", "R-Wpn-AAGun-ROF03",
 	"R-Wpn-AAGun-Accuracy02", "R-Wpn-Howitzer-Accuracy01", "R-Struc-VTOLPad-Upgrade03",
+];
+const mis_collectiveResClassic = [
+	"R-Defense-WallUpgrade05", "R-Struc-Materials05", "R-Struc-Factory-Upgrade05",
+	"R-Struc-VTOLPad-Upgrade03", "R-Vehicle-Engine05", "R-Vehicle-Metals05",
+	"R-Cyborg-Metals05", "R-Vehicle-Armor-Heat02", "R-Cyborg-Armor-Heat02",
+	"R-Sys-Engineering02", "R-Wpn-Cannon-Accuracy02", "R-Wpn-Cannon-Damage05",
+	"R-Wpn-Cannon-ROF03", "R-Wpn-Flamer-Damage06", "R-Wpn-Flamer-ROF03",
+	"R-Wpn-Howitzer-Accuracy02", "R-Wpn-Howitzer-Damage02", "R-Sys-Sensor-Upgrade01",
+	"R-Wpn-MG-Damage07", "R-Wpn-MG-ROF03", "R-Wpn-Mortar-Acc02", "R-Wpn-Mortar-Damage06",
+	"R-Wpn-Mortar-ROF03", "R-Wpn-Rocket-Accuracy02", "R-Wpn-Rocket-Damage06",
+	"R-Wpn-Rocket-ROF03", "R-Wpn-RocketSlow-Accuracy03", "R-Wpn-RocketSlow-Damage06",
+	"R-Wpn-RocketSlow-ROF03"
 ];
 
 function camEnemyBaseDetected_COMainBase()
@@ -46,9 +58,9 @@ function camEnemyBaseEliminated_COUplinkBase()
 //Group together attack droids in this base that are not already in a group
 function camEnemyBaseDetected_COMediumBase()
 {
-	var droids = enumArea("mediumBaseCleanup", THE_COLLECTIVE, false).filter(function(obj) {
-		return obj.type === DROID && obj.group === null && obj.canHitGround;
-	});
+	const droids = enumArea("mediumBaseCleanup", CAM_THE_COLLECTIVE, false).filter((obj) => (
+		obj.type === DROID && obj.group === null && obj.canHitGround
+	));
 
 	camManageGroup(camMakeGroup(droids), CAM_ORDER_ATTACK, {
 		regroup: false,
@@ -57,15 +69,15 @@ function camEnemyBaseDetected_COMediumBase()
 
 function truckDefense()
 {
-	if (enumDroid(THE_COLLECTIVE, DROID_CONSTRUCT).length === 0)
+	if (enumDroid(CAM_THE_COLLECTIVE, DROID_CONSTRUCT).length === 0)
 	{
 		removeTimer("truckDefense");
 		return;
 	}
 
-	var list = ["Emplacement-Howitzer105", "Emplacement-Rocket06-IDF", "Sys-CB-Tower01", "Emplacement-Howitzer105", "Emplacement-Rocket06-IDF", "Sys-SensoTower02"];
-	camQueueBuilding(THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos1"));
-	camQueueBuilding(THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos2"));
+	const list = ["Emplacement-Howitzer105", "Emplacement-Rocket06-IDF", "Sys-CB-Tower01", "Emplacement-Howitzer105", "Emplacement-Rocket06-IDF", "Sys-SensoTower02"];
+	camQueueBuilding(CAM_THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos1"));
+	camQueueBuilding(CAM_THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos2"));
 }
 
 function southEastAttack()
@@ -111,51 +123,67 @@ function enableTimeBasedFactories()
 
 function eventStartLevel()
 {
-	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, "SUB_2_7S", {
+	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, cam_levels.beta9.pre, {
 		area: "RTLZ",
 		message: "C26_LZ",
 		reinforcements: camMinutesToSeconds(3)
 	});
 
-	var startpos = getObject("startPosition");
-	var lz = getObject("landingZone"); //player lz
-	var tent = getObject("transporterEntry");
-	var text = getObject("transporterExit");
-	centreView(startpos.x, startpos.y);
+	const startPos = getObject("startPosition");
+	const lz = getObject("landingZone"); //player lz
+	const tEnt = getObject("transporterEntry");
+	const tExt = getObject("transporterExit");
+	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
-	startTransporterEntry(tent.x, tent.y, CAM_HUMAN_PLAYER);
-	setTransporterExit(text.x, text.y, CAM_HUMAN_PLAYER);
+	startTransporterEntry(tEnt.x, tEnt.y, CAM_HUMAN_PLAYER);
+	setTransporterExit(tExt.x, tExt.y, CAM_HUMAN_PLAYER);
 
-	var enemyLz = getObject("COLandingZone");
-	setNoGoArea(enemyLz.x, enemyLz.y, enemyLz.x2, enemyLz.y2, THE_COLLECTIVE);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_collectiveResClassic, CAM_THE_COLLECTIVE);
 
-	camSetArtifacts({
-		"COCyborgFactory-Arti": { tech: "R-Wpn-Rocket07-Tank-Killer" },
-		"COCommandCenter": { tech: "R-Wpn-Mortar3" },
-		"uplink": { tech: "R-Sys-VTOLCBS-Tower01" },
-		"COMediumFactory": { tech: "R-Wpn-Cannon4AMk1" },
-	});
+		camSetArtifacts({
+			"COCyborgFactory-Arti": { tech: "R-Wpn-Rocket07-Tank-Killer" },
+			"COCommandCenter": { tech: "R-Wpn-Mortar3" },
+			"uplink": { tech: "R-Sys-VTOLCBS-Tower01" },
+		});
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_collectiveRes, CAM_THE_COLLECTIVE);
 
-	camCompleteRequiredResearch(COLLECTIVE_RES, THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybf, cTempl.cocybth, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybc, cTempl.cocybsn, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybr, cTempl.cocybtk, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybm, cTempl.cocybag, CAM_THE_COLLECTIVE);
+
+		camSetArtifacts({
+			"COCyborgFactory-Arti": { tech: "R-Wpn-Rocket07-Tank-Killer" },
+			"COCommandCenter": { tech: "R-Wpn-Mortar3" },
+			"uplink": { tech: "R-Sys-VTOLCBS-Tower01" },
+			"COMediumFactory": { tech: "R-Wpn-Cannon4AMk1" },
+			"COWhirlwindSite": { tech: "R-Wpn-AAGun04" },
+		});
+	}
 
 	camSetEnemyBases({
 		"COUplinkBase": {
 			cleanup: "uplinkBaseCleanup",
 			detectMsg: "C26_BASE1",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"COMainBase": {
 			cleanup: "mainBaseCleanup",
 			detectMsg: "C26_BASE2",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"COMediumBase": {
 			cleanup: "mediumBaseCleanup",
 			detectMsg: "C26_BASE3",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 	});
 
@@ -164,43 +192,43 @@ function eventStartLevel()
 			assembly: "COCyborgFactory-ArtiAssembly",
 			order: CAM_ORDER_ATTACK,
 			groupSize: 4,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(40)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 36 : 40)),
 			data: {
 				regroup: false,
 				repair: 40,
 				count: -1,
 			},
-			templates: [cTempl.npcybc, cTempl.npcybf, cTempl.cocybag, cTempl.npcybr]
+			templates: (!camClassicMode()) ? [cTempl.cocybsn, cTempl.cocybth, cTempl.cocybag, cTempl.cocybtk] : [cTempl.npcybc, cTempl.npcybf, cTempl.cocybag, cTempl.npcybr]
 		},
 		"COCyborgFactory-b1": {
 			assembly: "COCyborgFactory-b1Assembly",
 			order: CAM_ORDER_ATTACK,
 			groupSize: 6,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(50)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 45 : 50)),
 			data: {
 				regroup: false,
 				repair: 40,
 				count: -1,
 			},
-			templates: [cTempl.cocybag, cTempl.npcybr]
+			templates: (!camClassicMode()) ? [cTempl.cocybag, cTempl.cocybtk] : [cTempl.cocybag, cTempl.npcybr]
 		},
 		"COCyborgFactory-b2": {
 			assembly: "COCyborgFactory-b2Assembly",
 			order: CAM_ORDER_ATTACK,
 			groupSize: 4,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(50)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 45 : 50)),
 			data: {
 				regroup: false,
 				repair: 40,
 				count: -1,
 			},
-			templates: [cTempl.npcybc, cTempl.npcybf]
+			templates: (!camClassicMode()) ? [cTempl.cocybsn, cTempl.cocybth] : [cTempl.npcybc, cTempl.npcybf]
 		},
 		"COHeavyFactory-b2L": {
 			assembly: "COHeavyFactory-b2LAssembly",
 			order: CAM_ORDER_ATTACK,
 			groupSize: 4,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(80)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 72 : 80)),
 			data: {
 				regroup: false,
 				repair: 20,
@@ -212,7 +240,7 @@ function eventStartLevel()
 			assembly: "COHeavyFactory-b2RAssembly",
 			order: CAM_ORDER_ATTACK,
 			groupSize: 5,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(60)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 54 : 60)),
 			data: {
 				regroup: false,
 				repair: 20,
@@ -224,7 +252,7 @@ function eventStartLevel()
 			assembly: "COMediumFactoryAssembly",
 			order: CAM_ORDER_ATTACK,
 			groupSize: 4,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(45)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 40 : 45)),
 			data: {
 				regroup: false,
 				repair: 30,
@@ -238,14 +266,14 @@ function eventStartLevel()
 
 	if (difficulty >= HARD)
 	{
-		addDroid(THE_COLLECTIVE, 26, 27, "Truck Panther Tracks", "Body6SUPP", "tracked01", "", "", "Spade1Mk1");
-		addDroid(THE_COLLECTIVE, 42, 4, "Truck Panther Tracks", "Body6SUPP", "tracked01", "", "", "Spade1Mk1");
-		camManageTrucks(THE_COLLECTIVE);
+		addDroid(CAM_THE_COLLECTIVE, 26, 27, "Truck Panther Tracks", tBody.tank.panther, tProp.tank.tracks, "", "", tConstruct.truck);
+		addDroid(CAM_THE_COLLECTIVE, 42, 4, "Truck Panther Tracks", tBody.tank.panther, tProp.tank.tracks, "", "", tConstruct.truck);
+		camManageTrucks(CAM_THE_COLLECTIVE);
 		setTimer("truckDefense", camChangeOnDiff(camMinutesToMilliseconds(6)));
 	}
 
 	queue("northWestAttack", camChangeOnDiff(camMinutesToMilliseconds(3)));
-	queue("mainBaseAttackGroup", camChangeOnDiff(camMinutesToMilliseconds(4.5)));
-	queue("southEastAttack", camChangeOnDiff(camMinutesToMilliseconds(5)));
-	queue("enableTimeBasedFactories", camChangeOnDiff(camMinutesToMilliseconds(6)));
+	queue("mainBaseAttackGroup", camChangeOnDiff(camMinutesToMilliseconds((difficulty <= MEDIUM) ? 4 : 4.5)));
+	queue("southEastAttack", camChangeOnDiff(camMinutesToMilliseconds((difficulty <= MEDIUM) ? 4.5 : 5)));
+	queue("enableTimeBasedFactories", camChangeOnDiff(camMinutesToMilliseconds((difficulty <= MEDIUM) ? 5 : 6)));
 }

@@ -20,13 +20,17 @@
 #define _WZ_CRASHHANDLING_PROVIDERS_H_
 
 #include <string>
-#include <3rdparty/json/json_fwd.hpp>
+#include <nlohmann/json_fwd.hpp>
 
-bool useCrashHandlingProvider(int argc, const char * const *argv);
-bool initCrashHandlingProvider(const std::string& platformPrefDir, const std::string& defaultLogFilePath);
+bool useCrashHandlingProvider(int argc, const char * const *argv, bool& out_debugCrashHandler);
+bool initCrashHandlingProvider(const std::string& platformPrefDir, const std::string& defaultLogFilePath, bool debugCrashHandler);
 bool shutdownCrashHandlingProvider();
 
 bool crashHandlingProviderSetTag(const std::string& key, const std::string& value);
 bool crashHandlingProviderSetContext(const std::string& key, const nlohmann::json& contextDictionary);
+
+bool crashHandlingProviderCaptureException(const char* type, const char* value, const std::string& description, bool captureStackTrace, bool handled = true, const nlohmann::json *additionalData = nullptr);
+
+bool crashHandlingProviderTestCrash();
 
 #endif //_WZ_CRASHHANDLING_PROVIDERS_H_

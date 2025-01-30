@@ -17,6 +17,7 @@
 		"name": "*Cyborg Mechanic*",
 		"repairPoints": 10,
 		"time": 7,
+		"usageClass": "Cyborg",
 		"weight": 150
 	},
 	"HeavyRepair": {
@@ -31,11 +32,11 @@
 		"name": "Heavy Repair Turret",
 		"repairPoints": 30,
 		"time": 7,
-		"weight": 3000
+		"weight": 2000
 	},
 	"LightRepair1": {
-		"buildPoints": 250,
-		"buildPower": 50,
+		"buildPoints": 125,
+		"buildPower": 40,
 		"designable": 1,
 		"droidType": "DROID_REPAIR",
 		"id": "LightRepair1",

@@ -11,22 +11,31 @@ on:
 jobs:
   lint-code-base:
     name: 'Lint Code Base'
+    permissions:
+      contents: read
+      packages: read
+      # To report GitHub Actions status checks
+      statuses: write
     runs-on: ubuntu-latest
     if: "!contains(github.event.head_commit.message, '[ci skip]')"
     steps:
-    - uses: actions/checkout@v2
+    - uses: actions/checkout@v4
       with:
         # Full git history is needed to get a proper list of changed files within `super-linter`
         fetch-depth: 0
     - name: Lint Code Base
-      uses: github/super-linter@v4
+      uses: super-linter/super-linter@v6
       env:
         VALIDATE_ALL_CODEBASE: false
         DEFAULT_BRANCH: master
         # .eslintrc.json allows non-standard comments
-        FILTER_REGEX_EXCLUDE: .*(\.eslintrc\.json|3rdparty/).*
+        FILTER_REGEX_EXCLUDE: .*(\.eslintrc\.json|3rdparty/|.ci/vcpkg/|lib/exceptionhandler/include/|platforms/emscripten/).*
         LINTER_RULES_PATH: /
         VALIDATE_YAML: true
         VALIDATE_JSON: true
         VALIDATE_JAVASCRIPT_ES: true
         JAVASCRIPT_ES_CONFIG_FILE: '.eslintrc.json'
+        VALIDATE_EDITORCONFIG: true
+        EDITORCONFIG_FILE_NAME: '.ecrc'
+        # To report GitHub Actions status checks
+        GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

@@ -38,10 +38,17 @@ public:
 	void display(int xOffset, int yOffset) override;
 
 	void setTip(std::string string) override;
+	void setHelp(optional<WidgetHelp> help) override;
 
 	std::string getTip() override
 	{
 		return pTip;
+	}
+
+	WidgetHelp const * getHelp() const override
+	{
+		if (!help.has_value()) { return nullptr; }
+		return &(help.value());
 	}
 
 	void setBackgroundColour(PIELIGHT colour)
@@ -61,13 +68,16 @@ public:
 	PIELIGHT	minorCol;			// Colour for the minor bar
 	PIELIGHT        textCol;                        // Colour for the text on the bar.
 	std::string         pTip;                           // The tool tip for the graph
-	std::string         text;                           // Text on the bar.
+	WzString            text;                           // Text on the bar.
 
 //private:
 	PIELIGHT backgroundColour;
 	WzText	 wzCachedText;
 
 	bool sizesDirty = false;
+
+private:
+	optional<WidgetHelp> help;
 };
 
 /* The trough bar graph display function */

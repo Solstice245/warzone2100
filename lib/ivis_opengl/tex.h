@@ -25,7 +25,8 @@
 #include "png_util.h"
 
 #include <functional>
-#include <optional-lite/optional.hpp>
+#include <unordered_set>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -43,20 +44,19 @@ void pie_AssignTexture(size_t page, gfx_api::texture* texture);
 
 //*************************************************************************
 
-bool scaleImageMaxSize(iV_Image *s, int maxWidth, int maxHeight);
-
-optional<size_t> iV_GetTexture(const char *filename, bool compression = true, int maxWidth = -1, int maxHeight = -1);
-optional<size_t> iV_GetTransformTexture(const char *filename, std::function<void (iV_Image&)> transformImageData = nullptr, bool compression = true, int maxWidth = -1, int maxHeight = -1);
+optional<size_t> iV_GetTexture(const char *filename, gfx_api::texture_type textureType, int maxWidth = -1, int maxHeight = -1);
 void iV_unloadImage(iV_Image *image);
 gfx_api::pixel_format iV_getPixelFormat(const iV_Image *image);
 
 bool replaceTexture(const WzString &oldfile, const WzString &newfile);
-size_t pie_AddTexPage(iV_Image *s, const char *filename, bool gameTexture);
-size_t pie_AddTexPage(iV_Image *s, const char *filename, bool gameTexture, size_t page);
+size_t pie_AddTexPage(gfx_api::texture *pTexture, const char *filename, gfx_api::texture_type textureType);
+size_t pie_AddTexPage(gfx_api::texture *pTexture, const char *filename, gfx_api::texture_type textureType, size_t page);
 void pie_TexInit();
 
 std::string pie_MakeTexPageName(const std::string& filename);
 std::string pie_MakeTexPageTCMaskName(const std::string& filename);
+
+bool debugReloadTexturesFromDisk(const std::unordered_set<size_t>& texPages);
 
 //*************************************************************************
 

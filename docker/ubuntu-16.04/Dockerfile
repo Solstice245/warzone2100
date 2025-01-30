@@ -3,7 +3,7 @@ FROM ubuntu:16.04
 RUN cat /etc/lsb-release
 
 RUN apt-get -u update \
- && apt-get -y install gcc g++ clang libc-dev dpkg-dev ninja-build pkg-config libpng12-dev libopenal-dev libphysfs-dev libvorbis-dev libtheora-dev libxrandr-dev zip unzip libfribidi-dev libfreetype6-dev libharfbuzz-dev libfontconfig1-dev docbook-xsl xsltproc asciidoc gettext git cmake libcurl4-gnutls-dev gnutls-dev \
+ && apt-get -y install gcc g++ clang libc-dev dpkg-dev ninja-build pkg-config libpng12-dev libopenal-dev libphysfs-dev libvorbis-dev libogg-dev libopus-dev libtheora-dev libxrandr-dev zip unzip libfribidi-dev libfreetype6-dev libharfbuzz-dev libfontconfig1-dev docbook-xsl xsltproc asciidoc gettext git cmake libcurl4-gnutls-dev gnutls-dev \
  && rm -rf /var/lib/apt/lists/*
 
 # Download, build, & install SQLite 3.14.2 from source
@@ -51,6 +51,16 @@ RUN echo "$SODIUM_SHA256 /tmp/libsodium-1.0.18.tar.gz" | sha256sum -c \
  && make install \
  && cd /tmp \
  && rm -rf /tmp/libsodium-1.0.18
+
+# Defines arguments which can be passed during build time.
+ARG USER=warzone2100
+ARG UID=1000
+# Create a user with given UID.
+RUN useradd -d /home/warzone2100 -m -g root -u "$UID" "$USER"
+# Switch to warzone2100 user by default.
+USER warzone2100
+# Check the current uid of the user.
+RUN id
 
 WORKDIR /code
 CMD ["sh"]

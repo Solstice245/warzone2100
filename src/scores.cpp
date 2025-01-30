@@ -53,6 +53,7 @@
 #include "lib/sound/audio.h"
 #include "lib/sound/audio_id.h"
 #include "intimage.h"
+#include "loop.h" //for prevMissionType
 
 #include "activity.h"
 #include "multistat.h"
@@ -202,7 +203,8 @@ bool	scoreInitSystem()
 	missionData.strLost			= 0;
 
 	missionData.artefactsFound	= 0;
-	missionData.missionStarted	= gameTime; // total game time is just gameTime
+	scoreUpdateVar(WD_MISSION_STARTED); // total game time is just gameTime
+	missionData.missionEnded	= 0;
 	missionData.shotsOnTarget	= 0;
 	missionData.shotsOffTarget	= 0;
 	missionData.babasMowedDown	= 0;
@@ -241,6 +243,9 @@ void	scoreUpdateVar(DATA_INDEX var)
 	case	WD_MISSION_STARTED:
 		missionData.missionStarted = gameTime;	// Init the mission start time
 		break;									// Should be called once per mission
+	case	WD_MISSION_ENDED:
+		missionData.missionEnded = gameTime - missionData.missionStarted;	// Mission ended
+		break;
 	case	WD_SHOTS_ON_TARGET:
 		missionData.shotsOnTarget++;	// We hit something
 		break;
@@ -258,21 +263,20 @@ void	scoreUpdateVar(DATA_INDEX var)
 }
 
 // Builds an ascii string for the passed in components 4:02:23 for example.
-void getAsciiTime(char *psText, unsigned time)
+void getAsciiTimeN(char *pDest, size_t destSize, unsigned time, bool showMs /*= false*/)
 {
 	int hours, minutes, seconds, milliseconds;
 	getTimeComponents(time, &hours, &minutes, &seconds, &milliseconds);
 
 	char const *hourColon = hours != 0 ? ":" : "";
 
-	bool showMs = gameTimeGetMod() < Rational(1, 4);
 	if (showMs)
 	{
-		sprintf(psText, "%.0d%s%02d:%02d.%03d", hours, hourColon, minutes, seconds, milliseconds);
+		snprintf(pDest, destSize, "%.0d%s%02d:%02d.%03d", hours, hourColon, minutes, seconds, milliseconds);
 	}
 	else
 	{
-		sprintf(psText, "%.0d%s%02d:%02d", hours, hourColon, minutes, seconds);
+		snprintf(pDest, destSize, "%.0d%s%02d:%02d", hours, hourColon, minutes, seconds);
 	}
 }
 
@@ -289,8 +293,44 @@ END_GAME_STATS_DATA	collectEndGameStatsData()
 	fullStats.numUnits = 0;
 	if (selectedPlayer < MAX_PLAYERS)
 	{
-		for (DROID *psDroid = apsDroidLists[selectedPlayer]; psDroid; psDroid = psDroid->psNext, fullStats.numUnits++) {}
-		for (DROID *psDroid = mission.apsDroidLists[selectedPlayer]; psDroid; psDroid = psDroid->psNext, fullStats.numUnits++) {}
+		unsigned int idx = 0;
+		do
+		{
+			DroidList* dList = nullptr;
+			switch (idx)
+			{
+				case 0: dList = &apsDroidLists[selectedPlayer]; break;
+				case 1: dList = &mission.apsDroidLists[selectedPlayer]; break;
+				case 2: if (prevMissionType == LEVEL_TYPE::LDS_MKEEP_LIMBO) { dList = &apsLimboDroids[selectedPlayer]; } break;
+				default: dList = nullptr;
+			}
+			if (!dList)
+			{
+				continue;
+			}
+			for (const DROID* psDroid : *dList)
+			{
+				if (psDroid == nullptr || isDead(psDroid))
+				{
+					continue;
+				}
+				++fullStats.numUnits;
+				if (psDroid->isTransporter())
+				{
+					if (psDroid->psGroup == nullptr)
+					{
+						continue;
+					}
+					for (DROID *psCurr : psDroid->psGroup->psList)
+					{
+						if (psCurr != psDroid)
+						{
+							++fullStats.numUnits;
+						}
+					}
+				}
+			}
+		} while (++idx < 3);
 	}
 
 	return fullStats;
@@ -399,13 +439,13 @@ void scoreDataToScreen(WIDGET *psWidget, ScoreDataToScreenCache& cache)
 	cache.wzInfoText_ArtifactsFound.render((pie_GetVideoBufferWidth() - cache.wzInfoText_ArtifactsFound.width()) / 2, 300 + D_H, WZCOL_FORM_TEXT);
 
 	/* Get the mission result time in a string - and write it out */
-	getAsciiTime((char *)&text2, gameTime - missionData.missionStarted);
+	getAsciiTime(text2, missionData.missionEnded);
 	snprintf(text, sizeof(text), _("Mission Time - %s"), text2);
 	cache.wzInfoText_MissionTime.setText(text, font_regular);
 	cache.wzInfoText_MissionTime.render((pie_GetVideoBufferWidth() - cache.wzInfoText_MissionTime.width()) / 2, 320 + D_H, WZCOL_FORM_TEXT);
 
 	/* Write out total game time so far */
-	getAsciiTime((char *)&text2, gameTime);
+	getAsciiTime(text2, gameTime);
 	snprintf(text, sizeof(text), _("Total Game Time - %s"), text2);
 	cache.wzInfoText_TotalGameTime.setText(text, font_regular);
 	cache.wzInfoText_TotalGameTime.render((pie_GetVideoBufferWidth() - cache.wzInfoText_TotalGameTime.width()) / 2, 340 + D_H, WZCOL_FORM_TEXT);
@@ -530,6 +570,7 @@ bool writeScoreData(const char *fileName)
 	ini.setValue("strLost", missionData.strLost);
 	ini.setValue("artefactsFound", missionData.artefactsFound);
 	ini.setValue("missionStarted", missionData.missionStarted);
+	ini.setValue("missionEnded", missionData.missionEnded);
 	ini.setValue("shotsOnTarget", missionData.shotsOnTarget);
 	ini.setValue("shotsOffTarget", missionData.shotsOffTarget);
 	ini.setValue("babasMowedDown", missionData.babasMowedDown);
@@ -553,6 +594,7 @@ bool readScoreData(const char *fileName)
 	missionData.strLost = ini.value("strLost").toInt();
 	missionData.artefactsFound = ini.value("artefactsFound").toInt();
 	missionData.missionStarted = ini.value("missionStarted").toInt();
+	missionData.missionEnded = ini.value("missionEnded").toInt();
 	missionData.shotsOnTarget = ini.value("shotsOnTarget").toInt();
 	missionData.shotsOffTarget = ini.value("shotsOffTarget").toInt();
 	missionData.babasMowedDown = ini.value("babasMowedDown").toInt();
@@ -582,19 +624,18 @@ void stdOutGameSummary(UDWORD realTimeThrottleSeconds, bool flush_output /* = tr
 				continue;
 			}
 			uint32_t unitsKilled = getMultiPlayUnitsKilled(n);
-			uint32_t numUnits = 0;
-			for (DROID *psDroid = apsDroidLists[n]; psDroid; psDroid = psDroid->psNext, numUnits++) {}
-			uint32_t numStructs = 0;
+			uint32_t numUnits = apsDroidLists[n].size();
+			uint32_t numStructs = apsStructLists[n].size();
 			uint32_t numFactories = 0;
 			uint32_t numResearch = 0;
 			uint32_t numFactoriesThatCanProduceConstructionUnits = 0;
-			for (STRUCTURE *psStruct = apsStructLists[n]; psStruct; psStruct = psStruct->psNext, numStructs++)
+			for (const STRUCTURE *psStruct : apsStructLists[n])
 			{
 				if (psStruct->status != SS_BUILT || psStruct->died != 0)
 				{
 					continue; // ignore structures that aren't completely built, or are "dead"
 				}
-				if (StructIsFactory(psStruct))
+				if (psStruct->isFactory())
 				{
 					numFactories++;
 					if (psStruct->pStructureType->type == REF_FACTORY ||
@@ -612,7 +653,7 @@ void stdOutGameSummary(UDWORD realTimeThrottleSeconds, bool flush_output /* = tr
 			// NOTE: This duplicates the logic in rules.js - checkEndConditions()
 			const bool playerCantDoAnything = (numFactoriesThatCanProduceConstructionUnits == 0) && (numUnits == 0);
 			const char * deadStatus = playerCantDoAnything ? "x" : "";
-			fprintf(stdout, "%2u | %11.11s | %10" PRIi64 " | %12" PRIi32 " | %13.13s | %11" PRIi32 " | %7" PRIi32 " | %s\n", n, NetPlay.players[n].name, getExtractedPower(n), unitsKilled, structInfoString.c_str(), numUnits, getPower(n), deadStatus);
+			fprintf(stdout, "%2u | %11.11s | %10" PRIi64 " | %12" PRIi32 " | %13.13s | %11" PRIi32 " | %7" PRIi32 " | %s\n", n, getPlayerName(n), getExtractedPower(n), unitsKilled, structInfoString.c_str(), numUnits, getPower(n), deadStatus);
 		}
 	}
 	fprintf(stdout, "--------------------------------------------------------------------------------------\n");

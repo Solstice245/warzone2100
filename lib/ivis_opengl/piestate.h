@@ -82,7 +82,7 @@ const Vector3f& getDefaultSunPosition();
 
 int pie_GetMaxAntialiasing();
 
-bool pie_LoadShaders();
+bool pie_LoadShaders(uint32_t shadowFilterSize, bool pointLightEnabled);
 void pie_FreeShaders();
 
 namespace pie_internal
@@ -90,12 +90,8 @@ namespace pie_internal
 	extern gfx_api::buffer* rectBuffer;
 }
 
-void pie_SetShaderStretchDepth(float stretch);
 float pie_GetShaderTime();
-float pie_GetShaderStretchDepth();
 void pie_SetShaderTime(uint32_t shaderTime);
-void pie_SetShaderEcmEffect(bool value);
-int pie_GetShaderEcmEffect();
 
 static inline glm::vec4 pal_PIELIGHTtoVec4(PIELIGHT rgba)
 {

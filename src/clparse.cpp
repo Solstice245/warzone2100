@@ -29,6 +29,7 @@
 #include "lib/ivis_opengl/screen.h"
 #include "lib/netplay/netplay.h"
 #include "lib/ivis_opengl/pieclip.h"
+#include "lib/ivis_opengl/png_util.h"
 
 #include "levels.h"
 #include "clparse.h"
@@ -43,6 +44,9 @@
 #include "warzoneconfig.h"
 #include "wrappers.h"
 #include "multilobbycommands.h"
+#include "gamehistorylogger.h"
+#include "stdinreader.h"
+#include "seqdisp.h"
 
 #include <cwchar>
 
@@ -83,10 +87,10 @@ static bool wz_autogame = false;
 static std::string wz_saveandquit;
 static std::string wz_test;
 static std::string wz_autoratingUrl;
+static bool wz_autoratingEnable = false;
 static bool wz_cli_headless = false;
 static bool wz_streamer_spectator_mode = false;
 static bool wz_lobby_slashcommands = false;
-static WZ_Command_Interface wz_cmd_interface = WZ_Command_Interface::None;
 static int wz_min_autostart_players = -1;
 
 #if defined(WZ_OS_WIN)
@@ -277,7 +281,6 @@ static int poptGetNextOpt(poptContext ctx)
 		}
 	}
 	ctx->bad = match;
-	ctx->current++;
 	return POPT_ERROR_BADOPT;
 }
 
@@ -342,14 +345,40 @@ typedef enum
 	CLI_WIN_ENABLE_CONSOLE,
 #endif
 	CLI_GAMEPORT,
+	CLI_NET_PORTMAPPING,
 	CLI_WZ_CRASH_RPT,
+	CLI_WZ_DEBUG_CRASH_HANDLER,
 	CLI_STREAMER_SPECTATOR,
 	CLI_LOBBY_SLASHCOMMANDS,
 	CLI_ADD_LOBBY_ADMINHASH,
 	CLI_ADD_LOBBY_ADMINPUBLICKEY,
 	CLI_COMMAND_INTERFACE,
 	CLI_STARTPLAYERS,
+	CLI_GAMELOG_OUTPUTMODES,
+	CLI_GAMELOG_OUTPUTKEY,
+	CLI_GAMELOG_OUTPUTNAMING,
+	CLI_GAMELOG_FRAMEINTERVAL,
+	CLI_GAMETIMELIMITMINUTES,
+	CLI_CONVERT_SPECULAR_MAP,
+	CLI_DEBUG_VERBOSE_SYNCLOG_OUTPUT,
+	CLI_ALLOW_VULKAN_IMPLICIT_LAYERS,
+	CLI_HOST_CHAT_CONFIG,
+	CLI_HOST_ASYNC_JOIN_APPROVAL,
+	CLI_AUTOHOST_START_NOT_READY,
+#if defined(__EMSCRIPTEN__)
+	CLI_VIDEOURL,
+#endif
 } CLI_OPTIONS;
+
+// Separate table that avoids *any* translated strings, to avoid any risk of gettext / libintl function calls
+static const struct poptOption debugOptionsTable[] =
+{
+	{ "debug", POPT_ARG_STRING, CLI_DEBUG, nullptr, nullptr },
+	{ "debugfile", POPT_ARG_STRING, CLI_DEBUGFILE, nullptr, nullptr },
+	{ "flush-debug-stderr", POPT_ARG_NONE, CLI_FLUSHDEBUGSTDERR, nullptr, nullptr },
+	// Terminating entry
+	{ nullptr, 0, 0,              nullptr,                                    nullptr },
+};
 
 static const struct poptOption *getOptionsTable()
 {
@@ -405,18 +434,35 @@ static const struct poptOption *getOptionsTable()
 		{ "skirmish", POPT_ARG_STRING, CLI_SKIRMISH,   N_("Start skirmish game with given settings file"), N_("test") },
 		{ "continue", POPT_ARG_NONE, CLI_CONTINUE,   N_("Continue the last saved game"), nullptr },
 		{ "autohost", POPT_ARG_STRING, CLI_AUTOHOST,   N_("Start host game with given settings file"), N_("autohost") },
-		{ "autorating", POPT_ARG_STRING, CLI_AUTORATING,   N_("Query ratings from given server url (containing \"{HASH}\"), when hosting"), N_("autorating") },
+		{ "autorating", POPT_ARG_STRING, CLI_AUTORATING,   N_("Query ratings from given server url, when hosting"), N_("autorating") },
 #if defined(WZ_OS_WIN)
 		{ "enableconsole", POPT_ARG_NONE, CLI_WIN_ENABLE_CONSOLE,   N_("Attach or create a console window and display console output (Windows only)"), nullptr },
 #endif
 		{ "gameport", POPT_ARG_STRING, CLI_GAMEPORT,   N_("Set game server port"), N_("port") },
+		{ "portmapping", POPT_ARG_STRING, CLI_NET_PORTMAPPING,   N_("Enable / disable port mapping when hosting"), N_("[1, true, 0, false]") },
 		{ "wz-crash-rpt", POPT_ARG_NONE, CLI_WZ_CRASH_RPT, nullptr, nullptr },
+		{ "wz-debug-crash-handler", POPT_ARG_NONE, CLI_WZ_DEBUG_CRASH_HANDLER, nullptr, nullptr },
 		{ "spectator-min-ui", POPT_ARG_NONE, CLI_STREAMER_SPECTATOR, nullptr, nullptr},
 		{ "enablelobbyslashcmd", POPT_ARG_NONE, CLI_LOBBY_SLASHCOMMANDS, N_("Enable lobby slash commands (for connecting clients)"), nullptr},
 		{ "addlobbyadminhash", POPT_ARG_STRING, CLI_ADD_LOBBY_ADMINHASH, N_("Add a lobby admin identity hash (for slash commands)"), _("hash string")},
 		{ "addlobbyadminpublickey", POPT_ARG_STRING, CLI_ADD_LOBBY_ADMINPUBLICKEY, N_("Add a lobby admin public key (for slash commands)"), N_("b64-pub-key")},
-		{ "enablecmdinterface", POPT_ARG_STRING, CLI_COMMAND_INTERFACE, N_("Enable command interface"), N_("(stdin)")},
+		{ "enablecmdinterface", POPT_ARG_STRING, CLI_COMMAND_INTERFACE, N_("Enable command interface"), N_("(stdin, unixsocket:path)")},
 		{ "startplayers", POPT_ARG_STRING, CLI_STARTPLAYERS, N_("Minimum required players to auto-start game"), N_("startplayers")},
+		{ "gamelog-output", POPT_ARG_STRING, CLI_GAMELOG_OUTPUTMODES, N_("Game history log output mode(s)"), "(log,cmdinterface)"},
+		{ "gamelog-outputkey", POPT_ARG_STRING, CLI_GAMELOG_OUTPUTKEY, N_("Game history log output key"), "[playerindex, playerposition]"},
+		{ "gamelog-outputnaming", POPT_ARG_STRING, CLI_GAMELOG_OUTPUTNAMING, N_("Game history log output naming"), "[default, autohosterclassic]"},
+		{ "gamelog-frameinterval", POPT_ARG_STRING, CLI_GAMELOG_FRAMEINTERVAL, N_("Game history log frame interval"), N_("interval in seconds")},
+		{ "gametimelimit", POPT_ARG_STRING, CLI_GAMETIMELIMITMINUTES, N_("Multiplayer game time limit (in minutes)"), N_("number of minutes")},
+		{ "convert-specular-map", POPT_ARG_STRING, CLI_CONVERT_SPECULAR_MAP, N_("Convert a specular-map .png to a luma, single-channel, grayscale .png (and exit)"), "inputpath/filename.png:outputpath/filename.png" },
+		{ "debug-verbose-sync-logs-until", POPT_ARG_STRING, CLI_DEBUG_VERBOSE_SYNCLOG_OUTPUT, nullptr, nullptr },
+		{ "allow-vulkan-implicit-layers", POPT_ARG_NONE, CLI_ALLOW_VULKAN_IMPLICIT_LAYERS, N_("Allow Vulkan implicit layers (that may be default-disabled due to potential crashes or bugs)"), nullptr },
+		{ "host-chat-config", POPT_ARG_STRING, CLI_HOST_CHAT_CONFIG, N_("Set the default hosting chat configuration / permissions"), "[allow,quickchat]" },
+		{ "async-join-approve", POPT_ARG_NONE, CLI_HOST_ASYNC_JOIN_APPROVAL, N_("Enable async join approval (for connecting clients)"), nullptr },
+		{ "autohost-not-ready", POPT_ARG_NONE, CLI_AUTOHOST_START_NOT_READY, N_("Starts the host (autohost) as not ready, even if it's a spectator host"), nullptr },
+#if defined(__EMSCRIPTEN__)
+		{ "videourl", POPT_ARG_STRING, CLI_VIDEOURL,   N_("Base URL for on-demand video downloads"), N_("Base video URL") },
+#endif
+
 		// Terminating entry
 		{ nullptr, 0, 0,              nullptr,                                    nullptr },
 	};
@@ -451,23 +497,11 @@ static const struct poptOption *getOptionsTable()
 	return TranslatedOptionsTable;
 }
 
-//! Early parsing of the commandline
-/**
- * First half of the command line parsing. Also see ParseCommandLine()
- * below. The parameters here are needed early in the boot process,
- * while the ones in ParseCommandLine can benefit from debugging being
- * set up first.
- * \param argc number of arguments given
- * \param argv string array of the arguments
- * \return Returns true on success, false on error */
-bool ParseCommandLineEarly(int argc, const char * const *argv)
+// Must not trigger or call any gettext / libintl routines!
+bool ParseCommandLineDebugFlags(int argc, const char * const *argv)
 {
-	poptContext poptCon = poptGetContext(nullptr, argc, argv, getOptionsTable(), 0);
+	poptContext poptCon = poptGetContext(nullptr, argc, argv, debugOptionsTable, 0);
 	int iOption;
-
-#if defined(WZ_OS_MAC) && defined(DEBUG)
-	debug_enable_switch("all");
-#endif /* WZ_OS_MAC && DEBUG */
 
 	/* loop through command line */
 	while ((iOption = poptGetNextOpt(poptCon)) > 0 || iOption == POPT_ERROR_BADOPT)
@@ -477,7 +511,7 @@ bool ParseCommandLineEarly(int argc, const char * const *argv)
 
 		if (iOption == POPT_ERROR_BADOPT)
 		{
-			qFatal("Unrecognized option: %s", poptBadOption(poptCon, 0));
+			continue;
 		}
 
 		switch (option)
@@ -516,6 +550,66 @@ bool ParseCommandLineEarly(int argc, const char * const *argv)
 			debugFlushStderr();
 			break;
 
+		default:
+			break;
+		};
+	}
+
+	return true;
+}
+
+static std::string specialGetBaseDir(const std::string& platformSpecificPath, std::string& output_filename)
+{
+	std::string result = platformSpecificPath;
+	const std::string dirSeparator(PHYSFS_getDirSeparator());
+	while (!result.empty() && (result.rfind(dirSeparator, std::string::npos) == (result.length() - dirSeparator.length())))
+	{
+		result.resize(result.length() - dirSeparator.length()); // Remove trailing path separators
+	}
+	size_t lastSlash = result.rfind(dirSeparator, std::string::npos);
+	if (lastSlash != std::string::npos)
+	{
+		output_filename = result.substr(lastSlash + 1);
+		return result.substr(0, lastSlash); // Trim off the last path component
+	}
+	else
+	{
+		// no dir ahead of path
+		output_filename = platformSpecificPath;
+		// use PhysFS_BaseDir
+		const char* pBaseDir = PHYSFS_getBaseDir();
+		return (pBaseDir) ? pBaseDir : "";
+	}
+}
+
+//! Early parsing of the commandline
+/**
+ * First half of the command line parsing. Also see ParseCommandLine()
+ * below. The parameters here are needed early in the boot process,
+ * while the ones in ParseCommandLine can benefit from debugging being
+ * set up first.
+ * \param argc number of arguments given
+ * \param argv string array of the arguments
+ * \return See ParseCLIEarlyResult enum */
+ParseCLIEarlyResult ParseCommandLineEarly(int argc, const char * const *argv)
+{
+	poptContext poptCon = poptGetContext(nullptr, argc, argv, getOptionsTable(), 0);
+	int iOption;
+
+	/* loop through command line */
+	while ((iOption = poptGetNextOpt(poptCon)) > 0 || iOption == POPT_ERROR_BADOPT)
+	{
+		CLI_OPTIONS option = (CLI_OPTIONS)iOption;
+		const char *token;
+
+		if (iOption == POPT_ERROR_BADOPT)
+		{
+			qFatal("Unrecognized option: %s", poptBadOption(poptCon, 0));
+		}
+
+		switch (option)
+		{
+
 		case CLI_CONFIGDIR:
 			// retrieve the configuration directory
 			token = poptGetOptArg(poptCon);
@@ -532,11 +626,11 @@ bool ParseCommandLineEarly(int argc, const char * const *argv)
 
 		case CLI_HELP:
 			poptPrintHelp(poptCon, stdout);
-			return false;
+			return ParseCLIEarlyResult::HANDLED_QUIT_EARLY_COMMAND;
 
 		case CLI_VERSION:
 			printf("Warzone 2100 - %s\n", version_getFormattedVersionString());
-			return false;
+			return ParseCLIEarlyResult::HANDLED_QUIT_EARLY_COMMAND;
 
 #if defined(WZ_OS_WIN)
 		case CLI_WIN_ENABLE_CONSOLE:
@@ -544,14 +638,91 @@ bool ParseCommandLineEarly(int argc, const char * const *argv)
 			break;
 #endif
 		case CLI_WZ_CRASH_RPT:
+		case CLI_WZ_DEBUG_CRASH_HANDLER:
 			// this is currently a no-op because it must be parsed even earlier than ParseCommandLineEarly
+			break;
+		case CLI_CONVERT_SPECULAR_MAP:
+			{
+				token = poptGetOptArg(poptCon);
+				if (token == nullptr || strlen(token) == 0)
+				{
+					qFatal("Missing convert-specular-map value");
+				}
+				// Should be a string with input and output filenames in the format:
+				// inputpath/filename.png:outputpath/filename.png
+				// (Where "/" is the platform path separator - on Windows, this would be "\")
+				std::string fullArg = token;
+				size_t firstDelimiter = fullArg.find(":");
+				if (firstDelimiter == std::string::npos || !(firstDelimiter + 1 < fullArg.size()))
+				{
+					std::string expectedInputPathExample = std::string("inputpath") + PHYSFS_getDirSeparator() + "filename.png";
+					std::string expectedOutputPathExample = std::string("outputpath") + PHYSFS_getDirSeparator() + "filename.png";
+					qFatal("Invalid convert-specular-map value - expecting format: %s:%s", expectedInputPathExample.c_str(), expectedOutputPathExample.c_str());
+				}
+
+				std::string inputPath = fullArg.substr(0, firstDelimiter);
+				std::string outputPath = fullArg.substr(firstDelimiter+1);
+
+				std::string inputFilename; std::string outputFilename;
+				std::string inputDir = specialGetBaseDir(inputPath, inputFilename);
+				std::string outputDir = specialGetBaseDir(outputPath, outputFilename);
+
+				// This is a bit of a hack, but set up PhysFS to use:
+				// - the path containing the inputFilename as the read path
+				// - the outputFilename path as the write path
+
+				if (inputDir.empty())
+				{
+					qFatal("convert-specular-map value does not seem to include the path to a file (including its directory)");
+				}
+				if (outputDir.empty())
+				{
+					qFatal("convert-specular-map value does not seem to include an output path");
+				}
+
+				if (!PHYSFS_setWriteDir(outputDir.c_str()))
+				{
+					qFatal("convert-specular-map - unable to configure output directory to: %s", outputDir.c_str());
+				}
+
+				// Output dir first so we can see what we write
+				PHYSFS_mount(PHYSFS_getWriteDir(), "", PHYSFS_PREPEND);
+
+				PHYSFS_mount(inputDir.c_str(), "input", PHYSFS_APPEND);
+
+				if (!iV_LoadAndSavePNG_AsLumaSingleChannel("input/" + inputFilename, outputFilename, true))
+				{
+					qFatal("convert-specular-map - failed to convert image: %s", inputDir.c_str());
+				}
+
+				PHYSFS_deinit();
+				exit(0);
+			}
 			break;
 		default:
 			break;
 		};
 	}
 
-	return true;
+	return ParseCLIEarlyResult::OK_CONTINUE;
+}
+
+optional<bool> cliOptValueToBool(const char *token)
+{
+	if (token == nullptr)
+	{
+		return nullopt;
+	}
+
+	if (strcmp(token, "1") == 0 || strcmp(token, "true") == 0)
+	{
+		return true;
+	}
+	if (strcmp(token, "0") == 0 || strcmp(token, "false") == 0)
+	{
+		return false;
+	}
+	return nullopt;
 }
 
 //! second half of parsing the commandline
@@ -584,6 +755,8 @@ bool ParseCommandLine(int argc, const char * const *argv)
 		case CLI_WIN_ENABLE_CONSOLE:
 #endif
 		case CLI_WZ_CRASH_RPT:
+		case CLI_WZ_DEBUG_CRASH_HANDLER:
+		case CLI_CONVERT_SPECULAR_MAP:
 			// These options are parsed in ParseCommandLineEarly() already, so ignore them
 			break;
 
@@ -595,6 +768,7 @@ bool ParseCommandLine(int argc, const char * const *argv)
 		case CLI_CRASH:
 			CauseCrash = true;
 			NetPlay.bComms = false;
+			SPinit(LEVEL_TYPE::CAMPAIGN);
 			sstrcpy(aLevelName, "CAM_3A");
 			SetGameMode(GS_NORMAL);
 			break;
@@ -781,6 +955,7 @@ bool ParseCommandLine(int argc, const char * const *argv)
 			{
 				qFatal("Unable to find specified replay");
 			}
+			setHostLaunch(HostLaunch::LoadReplay);
 			sstrcpy(sRequestResult, saveGameName); // hack to avoid crashes
 			SPinit(LEVEL_TYPE::SKIRMISH);
 			bMultiPlayer = true;
@@ -929,6 +1104,25 @@ bool ParseCommandLine(int argc, const char * const *argv)
 			debug(LOG_INFO, "Games will be hosted on port [%d]", NETgetGameserverPort());
 			break;
 
+		case CLI_NET_PORTMAPPING:
+			{
+				token = poptGetOptArg(poptCon);
+				if (token == nullptr)
+				{
+					qFatal("No value for portmapping option");
+				}
+				auto optValue = cliOptValueToBool(token);
+				if (optValue.has_value())
+				{
+					NetPlay.isPortMappingEnabled = optValue.value();
+				}
+				else
+				{
+					qFatal("Invalid value for portmapping option");
+				}
+			}
+			break;
+
 		case CLI_STREAMER_SPECTATOR:
 			wz_streamer_spectator_mode = true;
 			break;
@@ -956,20 +1150,42 @@ bool ParseCommandLine(int argc, const char * const *argv)
 			break;
 
 		case CLI_COMMAND_INTERFACE:
-			token = poptGetOptArg(poptCon);
-			if (token == nullptr || strlen(token) == 0)
 			{
-				// use default, which is currently "stdin"
-				token = "stdin";
-			}
-			if (strcmp(token, "stdin") == 0)
-			{
-				// enable stdin
-				wz_cmd_interface = WZ_Command_Interface::StdIn_Interface;
-			}
-			else
-			{
-				qFatal("Unsupported / invalid enablecmdinterface value");
+				token = poptGetOptArg(poptCon);
+				if (token == nullptr || strlen(token) == 0)
+				{
+					// use default, which is currently "stdin"
+					token = "stdin";
+				}
+				WZ_Command_Interface mode = WZ_Command_Interface::None;
+				std::string value;
+				if (strcmp(token, "stdin") == 0)
+				{
+					mode = WZ_Command_Interface::StdIn_Interface;
+				}
+				else if (strncmp(token, "unixsocket", strlen("unixsocket")) == 0)
+				{
+					mode = WZ_Command_Interface::Unix_Socket;
+					// expected form is "unixsocket:path" - parse for the path
+					if (strlen(token) > strlen("unixsocket"))
+					{
+						size_t delimeterIdx = strlen("unixsocket");
+						if (token[delimeterIdx] == ':' && token[delimeterIdx+1] != '\0')
+						{
+							// grab the rest of the string as the path value
+							value = &token[delimeterIdx+1];
+						}
+						else
+						{
+							qFatal("Invalid enablecmdinterface unixsocket value (expecting unixsocket:path)");
+						}
+					}
+				}
+				else
+				{
+					qFatal("Unsupported / invalid enablecmdinterface value");
+				}
+				configSetCmdInterface(mode, value);
 			}
 			break;
 		case CLI_STARTPLAYERS:
@@ -986,8 +1202,169 @@ bool ParseCommandLine(int argc, const char * const *argv)
 			debug(LOG_INFO, "Games will automatically start with [%d] players (when ready)", wz_min_autostart_players);
 			break;
 
-		};
-	}
+
+		case CLI_GAMELOG_OUTPUTMODES:
+		{
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr || strlen(token) == 0)
+			{
+				// use default, which is currently "log,cmdinterface"
+				token = "log,cmdinterface";
+			}
+			GameStoryLogger::OutputModes modes;
+			WzString inputVal(token);
+			auto params = inputVal.split(",");
+			for (const auto& a : params)
+			{
+				if (a.compare("log") == 0)
+				{
+					modes.logFile = true;
+				}
+				else if (a.compare("cmdinterface") == 0)
+				{
+					modes.cmdInterface = true;
+				}
+				else
+				{
+					qFatal("Unsupported / invalid gamelog-output value");
+				}
+			}
+			GameStoryLogger::instance().setOutputModes(modes);
+			break;
+		}
+
+		case CLI_GAMELOG_OUTPUTKEY:
+		{
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr || strlen(token) == 0)
+			{
+				qFatal("Missing gamelog-outputkey value");
+			}
+			if (strcmp(token, "playerindex") == 0)
+			{
+				GameStoryLogger::instance().setOutputKey(GameStoryLogger::OutputKey::PlayerIndex);
+			}
+			else if (strcmp(token, "playerposition") == 0)
+			{
+				GameStoryLogger::instance().setOutputKey(GameStoryLogger::OutputKey::PlayerPosition);
+			}
+			else
+			{
+				qFatal("Unsupported / invalid gamelog-outputkey value");
+			}
+			break;
+		}
+
+		case CLI_GAMELOG_OUTPUTNAMING:
+		{
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr || strlen(token) == 0)
+			{
+				qFatal("Missing gamelog-outputnaming value");
+			}
+			if (strcmp(token, "default") == 0)
+			{
+				GameStoryLogger::instance().setOutputNaming(GameStoryLogger::OutputNaming::Default);
+			}
+			else if (strcmp(token, "autohosterclassic") == 0)
+			{
+				GameStoryLogger::instance().setOutputNaming(GameStoryLogger::OutputNaming::AutohosterClassic);
+			}
+			else
+			{
+				qFatal("Unsupported / invalid gamelog-outputnaming value");
+			}
+			break;
+		}
+
+		case CLI_GAMELOG_FRAMEINTERVAL:
+		{
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr)
+			{
+				qFatal("Bad gamelog-frameinterval count");
+			}
+			int token_intval = atoi(token);
+			if (token_intval < 0)
+			{
+				qFatal("Invalid gamelog-frameinterval count");
+			}
+			GameStoryLogger::instance().setFrameLoggingInterval(static_cast<uint32_t>(token_intval));
+			break;
+		}
+
+		case CLI_GAMETIMELIMITMINUTES:
+		{
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr)
+			{
+				qFatal("Bad game time limit minutes count");
+			}
+			int token_intval = atoi(token);
+			if (token_intval < 0)
+			{
+				qFatal("Invalid game time limit minutes count");
+			}
+			war_setMPGameTimeLimitMinutes(static_cast<uint32_t>(token_intval));
+			game.gameTimeLimitMinutes = war_getMPGameTimeLimitMinutes();
+			break;
+		}
+
+		case CLI_DEBUG_VERBOSE_SYNCLOG_OUTPUT:
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr)
+			{
+				qFatal("Bad debug verbose synclog output gametime limit");
+			}
+			NET_setDebuggingModeVerboseOutputAllSyncLogs(atoi(token));
+			break;
+
+		case CLI_ALLOW_VULKAN_IMPLICIT_LAYERS:
+			war_runtimeOnlySetAllowVulkanImplicitLayers(true);
+			break;
+
+		case CLI_HOST_CHAT_CONFIG:
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr || strlen(token) == 0)
+			{
+				qFatal("Missing host-chat-config value");
+			}
+			if ((strcmp(token, "allow") == 0))
+			{
+				NETsetDefaultMPHostFreeChatPreference(true);
+			}
+			else if ((strcmp(token, "quickchat") == 0) || (strcmp(token, "qc") == 0))
+			{
+				NETsetDefaultMPHostFreeChatPreference(false);
+			}
+			else
+			{
+				qFatal("Unsupported / invalid host-chat-config value");
+			}
+			break;
+
+		case CLI_HOST_ASYNC_JOIN_APPROVAL:
+			NETsetAsyncJoinApprovalRequired(true);
+			break;
+
+		case CLI_AUTOHOST_START_NOT_READY:
+			setHostLaunchStartNotReady(true);
+			break;
+
+#if defined(__EMSCRIPTEN__)
+		case CLI_VIDEOURL:
+			token = poptGetOptArg(poptCon);
+			if (token == nullptr)
+			{
+				qFatal("Bad video url");
+			}
+			seq_setOnDemandVideoURL(token);
+			debug(LOG_INFO, "Using \"%s\" as base video URL.", token);
+			break;
+#endif
+
+		} // switch (option)
+	} // while
 
 	return true;
 }
@@ -1007,22 +1384,21 @@ const std::string &wz_skirmish_test()
 	return wz_test;
 }
 
-std::string autoratingUrl(std::string const &hash) {
-	auto url = wz_autoratingUrl;
-	auto h = wz_autoratingUrl.find_first_of("{HASH}");
-	if (h != std::string::npos)
-	{
-		url.replace(h, 6, hash);
-	}
-	return url;
-}
-
 void setAutoratingUrl(std::string url) {
 	wz_autoratingUrl = url;
 }
 
 std::string getAutoratingUrl() {
 	return wz_autoratingUrl;
+}
+
+void setAutoratingEnable(bool e)
+{
+	wz_autoratingEnable = e;
+}
+
+bool getAutoratingEnable() {
+	return wz_autoratingEnable;
 }
 
 bool streamer_spectator_mode()
@@ -1033,11 +1409,6 @@ bool streamer_spectator_mode()
 bool lobby_slashcommands_enabled()
 {
 	return wz_lobby_slashcommands;
-}
-
-WZ_Command_Interface wz_command_interface()
-{
-	return wz_cmd_interface;
 }
 
 int min_autostart_player_count()

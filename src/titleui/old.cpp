@@ -29,7 +29,6 @@
 #include "lib/ivis_opengl/piemode.h"
 #include "lib/ivis_opengl/piestate.h"
 #include "lib/ivis_opengl/screen.h"
-#include "lib/netplay/netplay.h"
 #include "../intdisplay.h"
 #include "../frontend.h"
 #include "../hci.h"
@@ -52,10 +51,6 @@ void WzOldTitleUI::start()
 {
 	switch (mode)
 	{
-	case CAMPAIGNS:
-		ActivityManager::instance().navigateToMenu("Campaign");
-		startCampaignSelector();
-		break;
 	case SINGLE:
 		ActivityManager::instance().navigateToMenu("Single Player");
 		startSinglePlayerMenu();
@@ -150,10 +145,6 @@ TITLECODE WzOldTitleUI::run()
 		runTitleMenu();
 		break;
 
-	case CAMPAIGNS:
-		runCampaignSelector();
-		break;
-
 	case SINGLE:
 		runSinglePlayerMenu();
 		break;
@@ -201,7 +192,8 @@ TITLECODE WzOldTitleUI::run()
 
 	case SHOWINTRO:
 		pie_SetFogStatus(false);
-		pie_ScreenFlip(CLEAR_BLACK);
+		pie_ScreenFrameRenderEnd();
+		pie_ScreenFrameRenderBegin();
 		changeTitleMode(TITLE);
 		return TITLECODE_SHOWINTRO;
 

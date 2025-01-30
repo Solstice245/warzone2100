@@ -22,11 +22,11 @@
 #include "frame.h"
 
 #include <set>
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
-bool WZ_PHYSFS_enumerateFiles(const char *dir, const std::function<bool (char* file)>& enumFunc)
+bool WZ_PHYSFS_enumerateFiles(const char *dir, const std::function<bool (const char* file)>& enumFunc)
 {
 	char **files = PHYSFS_enumerateFiles(dir);
 	if (!files)
@@ -45,7 +45,71 @@ bool WZ_PHYSFS_enumerateFiles(const char *dir, const std::function<bool (char* f
 	return true;
 }
 
-bool WZ_PHYSFS_enumerateFolders(const std::string &dir, const std::function<bool (char* folder)>& enumFunc)
+enum class ExtendedEnumResult
+{
+	Failure,
+	EnumFuncStoppedEnumeration,
+	Complete
+};
+static ExtendedEnumResult WZ_PHYSFS_enumerateFilesEx_Impl(const std::string& baseDir, std::string dir, const std::function<bool (const char* file)>& enumFunc, bool recurse)
+{
+	ExtendedEnumResult result = ExtendedEnumResult::Complete;
+	std::string fullEnumPath = baseDir;
+	if (!dir.empty())
+	{
+		fullEnumPath += "/" + dir;
+	}
+	char **files = PHYSFS_enumerateFiles(fullEnumPath.c_str());
+	if (!files)
+	{
+		debug(LOG_ERROR, "PHYSFS_enumerateFiles(\"%s\") failed: %s", fullEnumPath.c_str(), WZ_PHYSFS_getLastError());
+		return ExtendedEnumResult::Failure;
+	}
+	if (!strEndsWith(fullEnumPath, "/"))
+	{
+		fullEnumPath += "/";
+	}
+	if (!dir.empty() && !strEndsWith(dir, "/"))
+	{
+		dir += "/";
+	}
+	std::string fullPath;
+	std::string relativePath;
+	for (char **i = files; *i != nullptr; ++i)
+	{
+		fullPath = fullEnumPath;
+		fullPath.append(*i);
+		if (WZ_PHYSFS_isDirectory(fullPath.c_str()))
+		{
+			if (recurse)
+			{
+				std::string relativeRecurseDir = dir + *i;
+				if (WZ_PHYSFS_enumerateFilesEx_Impl(baseDir, relativeRecurseDir, enumFunc, recurse) == ExtendedEnumResult::EnumFuncStoppedEnumeration)
+				{
+					result = ExtendedEnumResult::EnumFuncStoppedEnumeration;
+					break;
+				}
+			}
+			continue;
+		}
+		relativePath = dir;
+		relativePath.append(*i);
+		if (!enumFunc(relativePath.c_str()))
+		{
+			result = ExtendedEnumResult::EnumFuncStoppedEnumeration;
+			break;
+		}
+	}
+	PHYSFS_freeList(files);
+	return result;
+}
+
+bool WZ_PHYSFS_enumerateFilesEx(const std::string &dir, const std::function<bool (const char* file)>& enumFunc, bool recurse /*= false*/)
+{
+	return WZ_PHYSFS_enumerateFilesEx_Impl(dir, "", enumFunc, recurse) == ExtendedEnumResult::Complete;
+}
+
+bool WZ_PHYSFS_enumerateFolders(const std::string &dir, const std::function<bool (const char* folder)>& enumFunc)
 {
 	char **files = PHYSFS_enumerateFiles(dir.c_str());
 	if (!files)

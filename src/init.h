@@ -25,6 +25,7 @@
 #define __INCLUDED_SRC_INIT_H__
 
 #include <vector>
+#include "terrain_defs.h"
 
 struct IMAGEFILE;
 
@@ -33,7 +34,7 @@ struct IMAGEFILE;
 #define FILE_LOAD_BUFFER_SIZE (1024*1024*4)
 extern char fileLoadBuffer[];
 
-bool systemInitialise(float horizScaleFactor, float vertScaleFactor);
+bool systemInitialise(unsigned int horizScalePercentage, unsigned int vertScalePercentage);
 void systemShutdown();
 bool frontendInitialise(const char *ResourceFile);
 bool frontendShutdown();
@@ -51,23 +52,39 @@ bool saveGameReset();
 
 struct wzSearchPath
 {
-	char path[PATH_MAX];
-	unsigned int priority;
-	wzSearchPath *higherPriority, * lowerPriority;
+	std::string path;
+	unsigned int priority = 0;
 };
 
-enum searchPathMode { mod_clean, mod_campaign, mod_multiplay, mod_override };
+enum searchPathMode { mod_clean, mod_campaign, mod_multiplay };
 
-void registerSearchPath(const char path[], unsigned int priority);
-bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map = NULL);
+void registerSearchPath(const std::string& path, unsigned int priority);
+void unregisterSearchPath(const std::string& path);
+void debugOutputSearchPaths();
+void debugOutputSearchPathMountErrors();
+bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map = NULL, const char* current_map_mount_point = NULL);
+bool rebuildExistingSearchPathWithGraphicsOptionChange();
 
-bool buildMapList();
+bool buildMapList(bool campaignOnly = false);
 bool CheckForMod(char const *mapFile);
 bool CheckForRandom(char const *mapFile, char const *mapDataFile0);
 bool setSpecialInMemoryMap(std::vector<uint8_t>&& mapArchiveData);
 
+std::vector<TerrainShaderQuality> getAvailableTerrainShaderQualityTextures();
+
 bool loadLevFile(const std::string& filename, searchPathMode datadir, bool ignoreWrf, char const *realFileName);
 
 extern IMAGEFILE	*FrontImages;
+
+enum MODS_PATHS: size_t
+{
+	MODS_MUSIC,
+	MODS_GLOBAL,
+	MODS_AUTOLOAD,
+	MODS_CAMPAIGN,
+	MODS_MULTIPLAY,
+	MODS_PATHS_MAX
+};
+const char* versionedModsPath(MODS_PATHS type);
 
 #endif // __INCLUDED_SRC_INIT_H__

@@ -22,7 +22,8 @@
 #include "map_crc.h"
 #include "map_script.h"
 #include "map_internal.h"
-#include <json/json.hpp>
+#include "map_jsonhelpers.h"
+#include <nlohmann/json.hpp>
 #include <cinttypes>
 #include <unordered_set>
 #include <limits>
@@ -32,8 +33,6 @@
 #define CURRENT_VERSION_NUM     VERSION_40
 
 #define MAX_PLAYERS         11                 ///< Maximum number of players in the game.
-
-#define PLAYER_SCAVENGERS -1
 
 // 65536 / 360 = 8192 / 45, with a bit less overflow risk.
 #define DEG(degrees) ((degrees) * 8192 / 45)
@@ -328,64 +327,6 @@ bool writeMapData(const MapData& map, const std::string &filename, IOProvider& m
 }
 
 // MARK: - Helper functions for loading / saving JSON files
-static optional<nlohmann::json> loadJsonObjectFromFile(const std::string& filename, IOProvider& mapIO, LoggingProtocol* pCustomLogger = nullptr)
-{
-	const auto &path = filename.c_str();
-	std::vector<char> data;
-	if (!mapIO.loadFullFile(filename, data))
-	{
-		return nullopt;
-	}
-	if (data.empty())
-	{
-		debug(pCustomLogger, LOG_ERROR, "Empty file: %s", path);
-		return nullopt;
-	}
-	if (data.back() != 0)
-	{
-		data.push_back('\0'); // always ensure data is null-terminated
-	}
-
-	// parse JSON
-	nlohmann::json mRoot;
-	try {
-		mRoot = nlohmann::json::parse(data.begin(), data.end() - 1);
-	}
-	catch (const std::exception &e) {
-		debug(pCustomLogger, LOG_ERROR, "JSON document from %s is invalid: %s", path, e.what());
-		return nullopt;
-	}
-	catch (...) {
-		debug(pCustomLogger, LOG_ERROR, "Unexpected exception parsing JSON %s", path);
-		return nullopt;
-	}
-	if (mRoot.is_null())
-	{
-		debug(pCustomLogger, LOG_ERROR, "JSON document from %s is null", path);
-		return nullopt;
-	}
-	if (!mRoot.is_object())
-	{
-		debug(pCustomLogger, LOG_ERROR, "JSON document from %s is not an object. Read: \n%s", path, data.data());
-		return nullopt;
-	}
-	data.clear();
-
-	return mRoot;
-}
-
-static bool saveOrderedJsonObjectToFile(const nlohmann::ordered_json& jsonObj, const std::string& filename, IOProvider& mapIO, LoggingProtocol* pCustomLogger = nullptr)
-{
-	std::string jsonStr = jsonObj.dump(4, ' ', false, nlohmann::ordered_json::error_handler_t::ignore);
-#if SIZE_MAX > UINT32_MAX
-	if (jsonStr.size() > static_cast<size_t>(std::numeric_limits<uint32_t>::max()))
-	{
-		debug(pCustomLogger, LOG_ERROR, "jsonString.size (%zu) exceeds uint32_t::max", jsonStr.size());
-		return false;
-	}
-#endif
-	return mapIO.writeFullFile(filename, jsonStr.c_str(), static_cast<uint32_t>(jsonStr.size()));
-}
 
 // Left-pads the current string with codepoint ch up to the minimumStringLength
 // If the current string length() is already >= minimumStringLength, no padding occurs.
@@ -656,16 +597,17 @@ static inline bool jsonGetBaseMapObjectInfo(T& mapObj, uint32_t jsonFileVersion,
 			return false;
 		}
 		uint32_t id = jsonObj["id"].get<uint32_t>();
-		if (id == 0)
+		if (id > 0)
 		{
-			// Invalid droid id - cannot be 0
-			debug(pCustomLogger, LOG_ERROR, "%s: Invalid \"id\" = 0 for: %s", jsonContext.filename, jsonContext.jsonPath);
-			return false;
+			mapObj.id = id;
 		}
-		mapObj.id = id;
+		else
+		{
+			debug(pCustomLogger, LOG_WARNING, "%s: Invalid \"id\" = 0 for: %s - ignoring id value", jsonContext.filename, jsonContext.jsonPath);
+		}
 	}
 	// "position" must contain at least two components [x, y]
-	auto position = jsonGetListOfType<int>(jsonObj, "position", 2, maxComponentsPosition, jsonContext, pCustomLogger);
+	auto position = jsonGetListOfType<uint32_t>(jsonObj, "position", 2, maxComponentsPosition, jsonContext, pCustomLogger);
 	if (position.has_value())
 	{
 		mapObj.position.x = position.value()[0];
@@ -858,8 +800,15 @@ static optional<FileLoadResult<Structure>> loadBJOStructureInit(const std::strin
 		}
 
 		Structure structure;
-		structure.id = id;
-		structure.name.assign(nameBuff.begin(), nameBuff.end());
+		if (id > 0)
+		{
+			structure.id = id;
+		}
+		else
+		{
+			debug(pCustomLogger, LOG_WARNING, "%s: Structure %" PRIu32 " has id = 0 - ignoring id value", path, i);
+		}
+		structure.name.assign(nameBuff.begin(), std::find(nameBuff.begin(), nameBuff.end(), '\0'));
 		// TODO: Possibly handle collecting modules?
 		structure.position.x = x;
 		structure.position.y = y;
@@ -1165,6 +1114,7 @@ bool writeMapStructureInitJSON(const std::vector<Structure>& structures, MapType
 		{
 			pStructuresRoot->push_back(std::move(structureObj));
 		}
+		++counter;
 	}
 
 	// write out to file
@@ -1177,13 +1127,13 @@ bool writeMapStructureInit(const std::vector<Structure>& structures, uint32_t ma
 	switch (format)
 	{
 		case OutputFormat::VER1_BINARY_OLD:
-			retVal = writeMapStructureInitBJO(structures, mapMaxPlayers, mapFolderPath + "/struct.bjo", mapIO, 8, pCustomLogger);
+			retVal = writeMapStructureInitBJO(structures, mapMaxPlayers, mapIO.pathJoin(mapFolderPath, "struct.bjo"), mapIO, 8, pCustomLogger);
 			break;
 		case OutputFormat::VER2:
-			retVal = writeMapStructureInitJSON(structures, mapType, mapFolderPath + "/struct.json", mapIO, 1, pCustomLogger);
+			retVal = writeMapStructureInitJSON(structures, mapType, mapIO.pathJoin(mapFolderPath, "struct.json"), mapIO, 1, pCustomLogger);
 			break;
 		case OutputFormat::VER3:
-			retVal = writeMapStructureInitJSON(structures, mapType, mapFolderPath + "/struct.json", mapIO, 2, pCustomLogger);
+			retVal = writeMapStructureInitJSON(structures, mapType, mapIO.pathJoin(mapFolderPath, "struct.json"), mapIO, 2, pCustomLogger);
 			break;
 	}
 	return retVal;
@@ -1250,8 +1200,15 @@ static optional<FileLoadResult<Droid>> loadBJODroidInit(const std::string& filen
 			return nullopt;
 		}
 		Droid droid;
-		droid.id = id;
-		droid.name.assign(nameBuff.begin(), nameBuff.end());
+		if (id > 0)
+		{
+			droid.id = id;
+		}
+		else
+		{
+			debug(pCustomLogger, LOG_WARNING, "%s: Droid %" PRIu32 " has id = 0 - ignoring id value", path, i);
+		}
+		droid.name.assign(nameBuff.begin(), std::find(nameBuff.begin(), nameBuff.end(), '\0'));
 		droid.position.x = (x & ~TILE_MASK) + TILE_UNITS / 2;
 		droid.position.y = (y & ~TILE_MASK) + TILE_UNITS / 2;
 		// ignore z component
@@ -1503,6 +1460,7 @@ bool writeMapDroidInitJSON(const std::vector<Droid>& droids, MapType mapType, co
 		{
 			pDroidsRoot->push_back(std::move(droidObj));
 		}
+		++counter;
 	}
 
 	// write out to file
@@ -1515,13 +1473,13 @@ bool writeMapDroidInit(const std::vector<Droid>& droids, uint32_t mapMaxPlayers,
 	switch (format)
 	{
 		case OutputFormat::VER1_BINARY_OLD:
-			retVal = writeMapDroidInitBJO(droids, mapMaxPlayers, mapFolderPath + "/dinit.bjo", mapIO, 8, pCustomLogger);
+			retVal = writeMapDroidInitBJO(droids, mapMaxPlayers, mapIO.pathJoin(mapFolderPath, "dinit.bjo"), mapIO, 8, pCustomLogger);
 			break;
 		case OutputFormat::VER2:
-			retVal = writeMapDroidInitJSON(droids, mapType, mapFolderPath + "/droid.json", mapIO, 1, pCustomLogger);
+			retVal = writeMapDroidInitJSON(droids, mapType, mapIO.pathJoin(mapFolderPath, "droid.json"), mapIO, 1, pCustomLogger);
 			break;
 		case OutputFormat::VER3:
-			retVal = writeMapDroidInitJSON(droids, mapType, mapFolderPath + "/droid.json", mapIO, 2, pCustomLogger);
+			retVal = writeMapDroidInitJSON(droids, mapType, mapIO.pathJoin(mapFolderPath, "droid.json"), mapIO, 2, pCustomLogger);
 			break;
 	}
 	return retVal;
@@ -1603,14 +1561,22 @@ static optional<FileLoadResult<Feature>> loadBJOFeatureInit(const std::string& f
 		}
 
 		Feature feature;
-		feature.id = id;
-		feature.name.assign(nameBuff.begin(), nameBuff.end());
+		if (id > 0)
+		{
+			feature.id = id;
+		}
+		else
+		{
+			debug(pCustomLogger, LOG_WARNING, "%s: Feature %" PRIu32 " has id = 0 - ignoring id value", path, i);
+		}
+		feature.name.assign(nameBuff.begin(), std::find(nameBuff.begin(), nameBuff.end(), '\0'));
 		feature.position.x = x;
 		feature.position.y = y;
 		// ignore z component
 		feature.direction = DEG(direction);
 		// check player - ONLY POSSIBLY USED FOR CAMPAIGN, but prior code always ignored it??
-		if (player != mapMaxPlayers)
+		auto converted_player = bjoConvertPlayer(player, mapMaxPlayers);
+		if (converted_player != PLAYER_SCAVENGERS && static_cast<uint32_t>(converted_player) != mapMaxPlayers)
 		{
 			// Since the prior code did not actually utilize this value, just check and print a warning (for now) if we are ignoring it
 			debug(pCustomLogger, LOG_WARNING, "%s: Ignoring player(%" PRIi32 ") for feature %" PRIu32 "", path, player, i);
@@ -1896,6 +1862,7 @@ bool writeMapFeatureInitJSON(const std::vector<Feature>& features, MapType mapTy
 		{
 			pFeaturesRoot->push_back(std::move(featureObj));
 		}
+		++counter;
 	}
 
 	// write out to file
@@ -1908,13 +1875,13 @@ bool writeMapFeatureInit(const std::vector<Feature>& features, uint32_t mapMaxPl
 	switch (format)
 	{
 		case OutputFormat::VER1_BINARY_OLD:
-			retVal = writeMapFeatureInitBJO(features, mapMaxPlayers, mapFolderPath + "/feat.bjo", mapIO, 8, pCustomLogger);
+			retVal = writeMapFeatureInitBJO(features, mapMaxPlayers, mapIO.pathJoin(mapFolderPath, "feat.bjo"), mapIO, 8, pCustomLogger);
 			break;
 		case OutputFormat::VER2:
-			retVal = writeMapFeatureInitJSON(features, mapType, mapFolderPath + "/feature.json", mapIO, 1, pCustomLogger);
+			retVal = writeMapFeatureInitJSON(features, mapType, mapIO.pathJoin(mapFolderPath, "feature.json"), mapIO, 1, pCustomLogger);
 			break;
 		case OutputFormat::VER3:
-			retVal = writeMapFeatureInitJSON(features, mapType, mapFolderPath + "/feature.json", mapIO, 2, pCustomLogger);
+			retVal = writeMapFeatureInitJSON(features, mapType, mapIO.pathJoin(mapFolderPath, "feature.json"), mapIO, 2, pCustomLogger);
 			break;
 	}
 	return retVal;
@@ -1932,7 +1899,7 @@ Map::Map()
 	m_terrainTypes = std::make_shared<TerrainTypeData>();
 }
 
-Map::Map(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, std::unique_ptr<LoggingProtocol> logger, std::unique_ptr<IOProvider> mapIO)
+Map::Map(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, std::shared_ptr<LoggingProtocol> logger, std::shared_ptr<IOProvider> mapIO)
 : m_mapFolderPath(mapFolderPath)
 , m_mapType(mapType)
 , m_mapMaxPlayers(mapMaxPlayers)
@@ -1941,10 +1908,9 @@ Map::Map(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlaye
 { }
 
 // Load a map from a specified folder path + mapType + maxPlayers + random seed (only used for script-generated maps), optionally supplying:
-// - previewOnly (set to true to shortcut processing of map details that don't factor into preview generation)
 // - a logger
 // - a WzMap::IOProvider
-std::unique_ptr<Map> Map::loadFromPath(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, uint32_t seed, bool previewOnly, std::unique_ptr<LoggingProtocol> logger, std::unique_ptr<IOProvider> mapIO)
+std::shared_ptr<Map> Map::loadFromPath(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, uint32_t seed, std::shared_ptr<LoggingProtocol> logger, std::shared_ptr<IOProvider> mapIO)
 {
 	if (!mapIO)
 	{
@@ -1954,8 +1920,8 @@ std::unique_ptr<Map> Map::loadFromPath(const std::string& mapFolderPath, MapType
 
 	std::vector<char> fileData;
 	// First, check for new game.js format
-	std::string gameJSPath = mapFolderPath + "/" + "game.js";
-	if (mapIO->loadFullFile(gameJSPath, fileData))
+	std::string gameJSPath = mapIO->pathJoin(mapFolderPath, "game.js");
+	if (mapIO->loadFullFile(gameJSPath, fileData, true))
 	{
 		debug(logger.get(), LOG_INFO, "Loading: %s", gameJSPath.c_str());
 		// Load script map, which actually loads everything
@@ -1968,17 +1934,19 @@ std::unique_ptr<Map> Map::loadFromPath(const std::string& mapFolderPath, MapType
 			result->m_mapIO = std::move(mapIO);
 			result->m_logger = std::move(logger);
 			result->m_terrainTypes.reset(); // clear this so the ttypes.ttp file is loaded on-demand
+			result->m_scriptGeneratedMapSeed = seed;
 			result->m_wasScriptGenerated = true;
+			result->m_mapScriptContents = std::make_shared<std::vector<char>>(std::move(fileData));
 		}
 		return result;
 	}
 
 	// Otherwise, construct a lazy-loading Map
-	std::unique_ptr<Map> pMap = std::unique_ptr<Map>(new Map(mapFolderPath, mapType, mapMaxPlayers, std::move(logger), std::move(mapIO)));
+	std::shared_ptr<Map> pMap = std::shared_ptr<Map>(new Map(mapFolderPath, mapType, mapMaxPlayers, std::move(logger), std::move(mapIO)));
 	return pMap;
 }
 
-bool Map::exportMapToPath(Map& map, const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, OutputFormat format, std::unique_ptr<LoggingProtocol> logger, std::unique_ptr<IOProvider> mapIO)
+bool Map::exportMapToPath(Map& map, const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, OutputFormat format, std::shared_ptr<LoggingProtocol> logger, std::shared_ptr<IOProvider> mapIO)
 {
 	if (!mapIO)
 	{
@@ -1992,7 +1960,7 @@ bool Map::exportMapToPath(Map& map, const std::string& mapFolderPath, MapType ma
 		debug(logger.get(), LOG_ERROR, "Failed to load / retrieve map data from: %s", map.mapFolderPath().c_str());
 		return false;
 	}
-	if (!writeMapData(*(mapData.get()), mapFolderPath + "/game.map", *(mapIO.get()), format, logger.get()))
+	if (!writeMapData(*(mapData.get()), mapIO->pathJoin(mapFolderPath, "game.map"), *(mapIO.get()), format, logger.get()))
 	{
 		debug(logger.get(), LOG_ERROR, "Failed to write map data to path: %s", mapFolderPath.c_str());
 		return false;
@@ -2004,7 +1972,7 @@ bool Map::exportMapToPath(Map& map, const std::string& mapFolderPath, MapType ma
 		debug(logger.get(), LOG_ERROR, "Failed to load / retrieve map terrain type data from: %s", map.mapFolderPath().c_str());
 		return false;
 	}
-	if (!writeTerrainTypes(*(mapTerrainTypes.get()), mapFolderPath + "/ttypes.ttp", *(mapIO.get()), format, logger.get()))
+	if (!writeTerrainTypes(*(mapTerrainTypes.get()), mapIO->pathJoin(mapFolderPath, "ttypes.ttp"), *(mapIO.get()), format, logger.get()))
 	{
 		debug(logger.get(), LOG_ERROR, "Failed to write map terrain type data to path: %s", mapFolderPath.c_str());
 		return false;
@@ -2057,7 +2025,7 @@ std::shared_ptr<MapData> Map::mapData()
 
 	// otherwise, load the map data on first request
 	if (!m_mapIO) { return nullptr; }
-	auto loadResult = loadMapData_Internal(m_mapFolderPath + "/" + "game.map", *m_mapIO, m_logger.get());
+	auto loadResult = loadMapData_Internal(m_mapIO->pathJoin(m_mapFolderPath, "game.map"), *m_mapIO, m_logger.get());
 	if (loadResult.has_value())
 	{
 		m_mapData = std::make_shared<MapData>(std::move(loadResult.value().mapData));
@@ -2077,12 +2045,12 @@ std::shared_ptr<std::vector<Structure>> Map::mapStructures()
 	if (!m_mapIO) { return nullptr; }
 	// Try JSON first
 	auto fileType = LoadedFileVersion::FileType::JSON;
-	auto loadResult = loadJsonStructureInit(m_mapFolderPath + "/" + "struct.json", m_mapType, *m_mapIO, m_logger.get());
+	auto loadResult = loadJsonStructureInit(m_mapIO->pathJoin(m_mapFolderPath, "struct.json"), m_mapType, *m_mapIO, m_logger.get());
 	if (!loadResult.has_value())
 	{
 		// Fallback to .bjo (old binary format)
 		fileType = LoadedFileVersion::FileType::BinaryBJO;
-		loadResult = loadBJOStructureInit(m_mapFolderPath + "/" + "struct.bjo", m_mapMaxPlayers, *m_mapIO, m_logger.get());
+		loadResult = loadBJOStructureInit(m_mapIO->pathJoin(m_mapFolderPath, "struct.bjo"), m_mapMaxPlayers, *m_mapIO, m_logger.get());
 	}
 	if (loadResult.has_value())
 	{
@@ -2103,12 +2071,12 @@ std::shared_ptr<std::vector<Droid>> Map::mapDroids()
 	if (!m_mapIO) { return nullptr; }
 	// Try JSON first
 	auto fileType = LoadedFileVersion::FileType::JSON;
-	auto loadResult = loadJsonDroidInit(m_mapFolderPath + "/" + "droid.json", m_mapType, *m_mapIO, m_logger.get());
+	auto loadResult = loadJsonDroidInit(m_mapIO->pathJoin(m_mapFolderPath, "droid.json"), m_mapType, *m_mapIO, m_logger.get());
 	if (!loadResult.has_value())
 	{
 		// Fallback to .bjo (old binary format)
 		fileType = LoadedFileVersion::FileType::BinaryBJO;
-		loadResult = loadBJODroidInit(m_mapFolderPath + "/" + "dinit.bjo", m_mapMaxPlayers, *m_mapIO, m_logger.get());
+		loadResult = loadBJODroidInit(m_mapIO->pathJoin(m_mapFolderPath, "dinit.bjo"), m_mapMaxPlayers, *m_mapIO, m_logger.get());
 	}
 	if (loadResult.has_value())
 	{
@@ -2129,12 +2097,12 @@ std::shared_ptr<std::vector<Feature>> Map::mapFeatures()
 	if (!m_mapIO) { return nullptr; }
 	// Try JSON first
 	auto fileType = LoadedFileVersion::FileType::JSON;
-	auto loadResult = loadJsonFeatureInit(m_mapFolderPath + "/" + "feature.json", m_mapType, *m_mapIO, m_logger.get());
+	auto loadResult = loadJsonFeatureInit(m_mapIO->pathJoin(m_mapFolderPath, "feature.json"), m_mapType, *m_mapIO, m_logger.get());
 	if (!loadResult.has_value())
 	{
 		// Fallback to .bjo (old binary format)
 		fileType = LoadedFileVersion::FileType::BinaryBJO;
-		loadResult = loadBJOFeatureInit(m_mapFolderPath + "/" + "feat.bjo", m_mapMaxPlayers, *m_mapIO, m_logger.get());
+		loadResult = loadBJOFeatureInit(m_mapIO->pathJoin(m_mapFolderPath, "feat.bjo"), m_mapMaxPlayers, *m_mapIO, m_logger.get());
 	}
 	if (loadResult.has_value())
 	{
@@ -2151,7 +2119,7 @@ std::shared_ptr<TerrainTypeData> Map::mapTerrainTypes()
 
 	// Otherwise, load the data on first request
 	if (!m_mapIO) { return nullptr; }
-	auto loadResult = loadTerrainTypes(m_mapFolderPath + "/" + "ttypes.ttp", *m_mapIO, m_logger.get());
+	auto loadResult = loadTerrainTypes(m_mapIO->pathJoin(m_mapFolderPath, "ttypes.ttp"), *m_mapIO, m_logger.get());
 	if (loadResult)
 	{
 		m_terrainTypes = std::make_shared<TerrainTypeData>();
@@ -2262,7 +2230,7 @@ optional<Map::LoadedFormat> Map::loadedMapFormat()
 
 	// process the loaded map object file versions
 	std::unordered_map<LoadedFileVersion::FileType, size_t, FileTypeFileHash> numFilesOfType;
-	optional<uint32_t> lastFileVersion;
+	optional<uint32_t> lastJSONFileVersion;
 	for (auto& it : m_fileVersions)
 	{
 		// skip MapData and TerrainData, which are currently always binary file types
@@ -2283,9 +2251,9 @@ optional<Map::LoadedFormat> Map::loadedMapFormat()
 		if (fileType == LoadedFileVersion::FileType::JSON)
 		{
 			// Need to check for consistent version
-			if (lastFileVersion.has_value())
+			if (lastJSONFileVersion.has_value())
 			{
-				if (lastFileVersion.value() != it.second.fileVersion())
+				if (lastJSONFileVersion.value() != it.second.fileVersion())
 				{
 					// File version is different from all prior file versions - JSON maps are expected to have files of the same version
 					return Map::LoadedFormat::MIXED;
@@ -2293,13 +2261,13 @@ optional<Map::LoadedFormat> Map::loadedMapFormat()
 			}
 			else
 			{
-				lastFileVersion = it.second.fileVersion();
+				lastJSONFileVersion = it.second.fileVersion();
 			}
 		}
 	}
 
 	// if we reached here, we should have all map object files of the same FileType
-	if (numFilesOfType.size() != 1 || !lastFileVersion.has_value())
+	if (numFilesOfType.size() != 1)
 	{
 		// or not? (presumably this isn't a loaded map)
 		return nullopt;
@@ -2314,6 +2282,11 @@ optional<Map::LoadedFormat> Map::loadedMapFormat()
 			break;
 		case LoadedFileVersion::FileType::JSON:
 		{
+			if (!lastJSONFileVersion.has_value())
+			{
+				// should not happen
+				return nullopt;
+			}
 			auto mapDataFileVersionResult = getFileVersion(MapFile::MapData);
 			if (!mapDataFileVersionResult.has_value())
 			{
@@ -2321,11 +2294,11 @@ optional<Map::LoadedFormat> Map::loadedMapFormat()
 				return nullopt;
 			}
 			auto mapDataFileVersion = mapDataFileVersionResult.value();
-			if (lastFileVersion.value() == 1)
+			if (lastJSONFileVersion.value() == 1)
 			{
 				return ((mapDataFileVersion.fileType() == LoadedFileVersion::FileType::BinaryBJO) && (mapDataFileVersion.fileVersion() < VERSION_40)) ? Map::LoadedFormat::JSON_v1 : Map::LoadedFormat::MIXED;
 			}
-			else if (lastFileVersion.value() == 2)
+			else if (lastJSONFileVersion.value() == 2)
 			{
 				return ((mapDataFileVersion.fileType() == LoadedFileVersion::FileType::BinaryBJO) && (mapDataFileVersion.fileVersion() == VERSION_40)) ? Map::LoadedFormat::JSON_v2 : Map::LoadedFormat::MIXED;
 			}
@@ -2342,6 +2315,81 @@ optional<Map::LoadedFormat> Map::loadedMapFormat()
 	}
 
 	return nullopt; // silence warning
+}
+
+std::shared_ptr<Map> Map::generateFromExistingScriptMap(uint32_t seed, std::shared_ptr<LoggingProtocol> logger /*= nullptr*/)
+{
+	if (!m_wasScriptGenerated || m_mapScriptContents == nullptr)
+	{
+		return nullptr;
+	}
+
+	std::string gameJSPath = m_mapIO->pathJoin(m_mapFolderPath, "game.js");
+	// Load script map, which actually loads everything
+	auto result = runMapScript(*m_mapScriptContents.get(), gameJSPath, seed, false, logger.get());
+	if (result)
+	{
+		result->m_mapFolderPath = m_mapFolderPath;
+		result->m_mapType = m_mapType;
+		result->m_mapMaxPlayers = m_mapMaxPlayers;
+		result->m_mapIO = m_mapIO;
+		result->m_logger = std::move(logger);
+		if (m_terrainTypes != nullptr)
+		{
+			// deep-copy over the current terrainTypes data
+			result->m_terrainTypes = std::make_shared<TerrainTypeData>();
+			*(result->m_terrainTypes) = *m_terrainTypes;
+		}
+		else
+		{
+			result->m_terrainTypes.reset(); // clear this so the ttypes.ttp file is loaded on-demand (if possible)
+		}
+		result->m_scriptGeneratedMapSeed = seed;
+		result->m_wasScriptGenerated = true;
+		result->m_mapScriptContents = m_mapScriptContents;
+	}
+	return result;
+}
+
+optional<uint32_t> Map::scriptGeneratedMapSeed() const
+{
+	if (!m_wasScriptGenerated)
+	{
+		return nullopt;
+	}
+	return m_scriptGeneratedMapSeed;
+}
+
+std::unordered_set<std::string> Map::expectedFileNames(optional<LoadedFormat> format /*= nullopt*/)
+{
+	std::unordered_set<std::string> results;
+	if (format.has_value() && format.value() == LoadedFormat::MIXED)
+	{
+		format.reset();
+	}
+	if (!format.has_value())
+	{
+		// ancient .ini files
+		results.insert({"droid.ini", "feature.ini", "struct.ini"});
+	}
+	if (format.value_or(LoadedFormat::BINARY_OLD) == LoadedFormat::BINARY_OLD)
+	{
+		results.insert({"game.map", "ttypes.ttp", "dinit.bjo", "feat.bjo", "struct.bjo"});
+	}
+	if (format.value_or(LoadedFormat::JSON_v1) == LoadedFormat::JSON_v1)
+	{
+		results.insert({"game.map", "ttypes.ttp", "droid.json", "feature.json", "struct.json"});
+	}
+	if (format.value_or(LoadedFormat::SCRIPT_GENERATED) == LoadedFormat::SCRIPT_GENERATED)
+	{
+		results.insert({"game.js", "ttypes.ttp"});
+	}
+	if (format.value_or(LoadedFormat::JSON_v2) == LoadedFormat::JSON_v2)
+	{
+		results.insert({"game.map", "ttypes.ttp", "droid.json", "feature.json", "struct.json"});
+	}
+
+	return results;
 }
 
 } // namespace WzMap

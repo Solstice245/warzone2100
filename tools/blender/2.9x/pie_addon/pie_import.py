@@ -24,9 +24,20 @@ import bmesh
 from .shared import getTexAnimGrp
 
 
-def convertStrListToNumList(ls):
+def convertStrListToFloatList(ls):
     return [float(word) for word in ls]
 
+def convertStrListToIntList(ls):
+    return [int(word) for word in ls]
+
+def convertPolygonList(ls):
+    """First 5 elements are definitely int,
+    following elements are actually floats
+    """
+    out = [int(word) for word in ls[:5]]
+    for i in range(5, len(ls)):
+        out.append(float(ls[i]))
+    return out
 
 def newTexAnimGroup(ob, poly):
     ob.pie_tex_anim_grps.add()
@@ -99,23 +110,25 @@ class Importer():
 
                 elif fl == 'ANIMOBJECT':
                     pie_info['LEVELS'][lvl][fl].append(
-                        ([float(ls[1]), float(ls[2])])
+                        ([int(ls[1]), int(ls[2])])
                     )
 
             else:
 
                 if reading in ['POINTS', 'SHADOWPOINTS', 'CONNECTORS']:
-                    li = convertStrListToNumList(ls)
+                    li = convertStrListToFloatList(ls)
 
                     if reading == 'CONNECTORS':
                         result = (li[0] * 0.01, li[1] * 0.01, li[2] * 0.01)
                     else:
                         result = (li[0] * 0.01, li[2] * 0.01, li[1] * 0.01)
+                elif reading == 'POLYGONS':
+                    result = tuple(convertPolygonList(ls))
 
                 elif reading in [
-                    'POLYGONS', 'NORMALS', 'ANIMOBJECT', 'SHADOWPOLYGONS'
+                    'NORMALS', 'ANIMOBJECT', 'SHADOWPOLYGONS'
                 ]:
-                    result = tuple(convertStrListToNumList(ls))
+                    result = tuple(convertStrListToIntList(ls))
 
                 pie_info['LEVELS'][lvl][reading].append(result)
 
@@ -172,8 +185,9 @@ class Importer():
             pie_polygons = []
 
             for p in level['POLYGONS']:
-                pie_polygons.append((p[2], p[3], p[4]))
-
+                # Normals in Blender and in game are flipped
+                # Import and export in opposite order to flip them
+                pie_polygons.append((p[2], p[4], p[3]))
             mesh.from_pydata(pie_points, [], pie_polygons)
 
             animatedPolygons = []
@@ -192,12 +206,12 @@ class Importer():
 
                 if pieParse['PIE'] == '3':
                     uvData[L + 0].uv = ((p[5 + m], -p[6 + m] + 1))
-                    uvData[L + 1].uv = ((p[7 + m], -p[8 + m] + 1))
-                    uvData[L + 2].uv = ((p[9 + m], -p[10 + m] + 1))
+                    uvData[L + 1].uv = ((p[9 + m], -p[10 + m] + 1))
+                    uvData[L + 2].uv = ((p[7 + m], -p[8 + m] + 1))
                 elif pieParse['PIE'] == '2':
                     uvData[L + 0].uv = ((p[5 + m] / n, (-p[6 + m] / n) + 1))
-                    uvData[L + 1].uv = ((p[7 + m] / n, (-p[8 + m] / n) + 1))
-                    uvData[L + 2].uv = ((p[9 + m] / n, (-p[10 + m] / n) + 1))
+                    uvData[L + 1].uv = ((p[9 + m] / n, (-p[10 + m] / n) + 1))
+                    uvData[L + 2].uv = ((p[7 + m] / n, (-p[8 + m] / n) + 1))
 
             bpy.ops.object.mode_set(mode='EDIT', toggle=False)
             bm = bmesh.from_edit_mesh(mesh)
@@ -311,7 +325,6 @@ class Importer():
                     self.scene.frame_start = level['ANIMOBJECT'][1][0]
 
                 for key in level['ANIMOBJECT']:
-
                     if len(key) < 10:
                         meshOb.pie_object_prop.animTime = key[0]
                         meshOb.pie_object_prop.animCycle = key[1]

@@ -35,6 +35,7 @@
 static PointTree *gridPointTree = nullptr;  // A quad-tree-like object.
 static PointTree::Filter *gridFiltersUnseen;
 static PointTree::Filter *gridFiltersDroidsByPlayer;
+static PointTree::Filter *gridFiltersDroidsRepairCandidates;
 
 // initialise the grid system
 bool gridInitialise()
@@ -43,6 +44,7 @@ bool gridInitialise()
 	gridPointTree = new PointTree;
 	gridFiltersUnseen = new PointTree::Filter[MAX_PLAYERS];
 	gridFiltersDroidsByPlayer = new PointTree::Filter[MAX_PLAYERS];
+	gridFiltersDroidsRepairCandidates = new PointTree::Filter[MAX_PLAYERS];
 
 	return true;  // Yay, nothing failed!
 }
@@ -55,18 +57,36 @@ void gridReset()
 	// Put all existing objects into the point tree.
 	for (unsigned player = 0; player < MAX_PLAYERS; player++)
 	{
-		BASE_OBJECT *start[3] = {(BASE_OBJECT *)apsDroidLists[player], (BASE_OBJECT *)apsStructLists[player], (BASE_OBJECT *)apsFeatureLists[player]};
-		for (unsigned type = 0; type != sizeof(start) / sizeof(*start); ++type)
+		for (BASE_OBJECT* psObj : apsDroidLists[player])
 		{
-			for (BASE_OBJECT *psObj = start[type]; psObj != nullptr; psObj = psObj->psNext)
+			if (!psObj->died)
 			{
-				if (!psObj->died)
+				gridPointTree->insert(psObj, psObj->pos.x, psObj->pos.y);
+				for (unsigned char& viewer : psObj->seenThisTick)
 				{
-					gridPointTree->insert(psObj, psObj->pos.x, psObj->pos.y);
-					for (unsigned char &viewer : psObj->seenThisTick)
-					{
-						viewer = 0;
-					}
+					viewer = 0;
+				}
+			}
+		}
+		for (BASE_OBJECT* psObj : apsStructLists[player])
+		{
+			if (!psObj->died)
+			{
+				gridPointTree->insert(psObj, psObj->pos.x, psObj->pos.y);
+				for (unsigned char& viewer : psObj->seenThisTick)
+				{
+					viewer = 0;
+				}
+			}
+		}
+		for (BASE_OBJECT* psObj : apsFeatureLists[player])
+		{
+			if (!psObj->died)
+			{
+				gridPointTree->insert(psObj, psObj->pos.x, psObj->pos.y);
+				for (unsigned char& viewer : psObj->seenThisTick)
+				{
+					viewer = 0;
 				}
 			}
 		}
@@ -78,6 +98,7 @@ void gridReset()
 	{
 		gridFiltersUnseen[player].reset(*gridPointTree);
 		gridFiltersDroidsByPlayer[player].reset(*gridPointTree);
+		gridFiltersDroidsRepairCandidates[player].reset(*gridPointTree);
 	}
 }
 
@@ -126,10 +147,10 @@ static GridList const &gridStartIterateFiltered(int32_t x, int32_t y, uint32_t r
 		}
 	}
 	gridPointTree->lastQueryResults.erase(w, i);  // Erase all points that were a bit too far.
-	/*
+
 	// In case you are curious.
-	debug(LOG_WARNING, "gridStartIterateFiltered(%d, %d, %u) found %u objects", x, y, radius, (unsigned)gridPointTree->lastQueryResults.size());
-	*/
+	//debug(LOG_WARNING, "gridStartIterateFiltered(%d, %d, %u) found %u objects", x, y, radius, (unsigned)gridPointTree->lastQueryResults.size());
+	
 	static GridList gridList;
 	gridList.resize(gridPointTree->lastQueryResults.size());
 	for (unsigned n = 0; n < gridList.size(); ++n)
@@ -184,6 +205,28 @@ struct ConditionDroidsByPlayer
 GridList const &gridStartIterateDroidsByPlayer(int32_t x, int32_t y, uint32_t radius, int player)
 {
 	return gridStartIterateFiltered(x, y, radius, &gridFiltersDroidsByPlayer[player], ConditionDroidsByPlayer(player));
+}
+
+struct ConditionDroidCandidateForRepair
+{
+	ConditionDroidCandidateForRepair(int32_t player_) : player(player_) {}
+	bool test(BASE_OBJECT *obj) const
+	{
+		if (obj->type != OBJ_DROID) return false;
+		const DROID *psDroid = (const DROID*) obj;
+		const bool isOwnOrAlly = psDroid->player == player || aiCheckAlliances(psDroid->player, player);
+		const bool isVTOL = psDroid->getPropulsionStats()->propulsionType == PROPULSION_TYPE_LIFT;
+		// either it's a ground unit, or it's a VTOL on ground
+		const bool isOnGround = (!isVTOL) || (isVTOL && (psDroid->sMove.Status == MOVEINACTIVE && psDroid->sMove.iVertSpeed == 0));
+		// Note: no check for droidIsDamaged(psDroid) this is intentional
+		return !psDroid->died && isOwnOrAlly && isOnGround;
+	}
+	int player;
+};
+
+GridList const &gridStartIterateRepairCandidates(int32_t x, int32_t y, uint32_t radius, int player)
+{
+	return gridStartIterateFiltered(x, y, radius, &gridFiltersDroidsRepairCandidates[player], ConditionDroidCandidateForRepair(player));
 }
 
 struct ConditionUnseen

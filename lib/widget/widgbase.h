@@ -30,7 +30,8 @@
 #include <vector>
 #include <functional>
 #include <string>
-#include <optional-lite/optional.hpp>
+#include <set>
+#include <nonstd/optional.hpp>
 #include "lib/framework/geometry.h"
 #include "lib/framework/wzstring.h"
 
@@ -49,12 +50,13 @@ class W_SLIDER;
 class StateButton;
 class ListWidget;
 class ScrollBarWidget;
+struct WIDGET_KEYSTATE;
 
 /* The display function prototype */
 typedef void (*WIDGET_DISPLAY)(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
 
 /* The optional user callback function */
-typedef void (*WIDGET_CALLBACK)(WIDGET *psWidget, W_CONTEXT *psContext);
+typedef void (*WIDGET_CALLBACK)(WIDGET *psWidget, const W_CONTEXT *psContext);
 typedef void (*WIDGET_AUDIOCALLBACK)(int AudioID);
 
 /* The optional "calc layout" callback function, to support runtime layout recalculation */
@@ -69,7 +71,7 @@ typedef std::function<void (WIDGET *psWidget)> WIDGET_CALCLAYOUT_FUNC;
 typedef std::function<void (WIDGET *psWidget)> WIDGET_ONDELETE_FUNC;
 
 /* The optional hit-testing function, used for custom hit-testing within the outer bounding rectangle */
-typedef std::function<bool (WIDGET *psWidget, int x, int y)> WIDGET_HITTEST_FUNC;
+typedef std::function<bool (const WIDGET *psWidget, int x, int y)> WIDGET_HITTEST_FUNC;
 
 
 /* The different base types of widget */
@@ -114,6 +116,7 @@ private:
 	Vector2i offset = {0, 0};
 	WzRect clipRect = {0, 0, 0, 0};
 	bool clipped = false;
+	bool allowChildDisplayIfSelfClipped = false;
 
 public:
 	int32_t getXOffset() const
@@ -126,11 +129,68 @@ public:
 		return offset.y;
 	}
 
+	bool allowChildDisplayRecursiveIfSelfClipped() const
+	{
+		return allowChildDisplayIfSelfClipped;
+	}
+
 	bool clipContains(WzRect const& rect) const;
 
 	WidgetGraphicsContext translatedBy(int32_t x, int32_t y) const;
 
 	WidgetGraphicsContext clippedBy(WzRect const &newRect) const;
+
+	WidgetGraphicsContext setAllowChildDisplayRecursiveIfSelfClipped(bool val) const;
+};
+
+struct WidgetHelp
+{
+public:
+	enum class InteractionTriggers: uint8_t
+	{
+		PrimaryClick,
+		SecondaryClick,
+		ClickAndHold,
+		Misc
+	};
+	static constexpr size_t NUM_WIDGET_INTERACTION_TRIGGERS = static_cast<size_t>(InteractionTriggers::Misc) + 1;
+	typedef std::set<InteractionTriggers> WidgetInteractionTriggerFlagSet;
+	struct InteractionDescription
+	{
+		WidgetInteractionTriggerFlagSet triggers;
+		WzString description;
+	};
+	struct KeybindingInfo
+	{
+		std::string keybindingName; // for lookup on display with the input manager
+	};
+public:
+	WzString title;
+	WzString description;
+	std::vector<InteractionDescription> interactions;
+	std::vector<KeybindingInfo> relatedKeybindings;
+public:
+	WidgetHelp() { }
+	WidgetHelp& setTitle(const WzString& newValue)
+	{
+		title = newValue;
+		return *this;
+	}
+	WidgetHelp& setDescription(const WzString& newValue)
+	{
+		description = newValue;
+		return *this;
+	}
+	WidgetHelp& addInteraction(WidgetInteractionTriggerFlagSet triggers, const WzString& effectDescription)
+	{
+		interactions.push_back({triggers, effectDescription});
+		return *this;
+	}
+	WidgetHelp& addRelatedKeybinding(const std::string& keybindingName)
+	{
+		relatedKeybindings.push_back({keybindingName});
+		return *this;
+	}
 };
 
 /* The base widget data type */
@@ -154,6 +214,10 @@ public:
 	{
 		return "";
 	}
+	virtual WidgetHelp const * getHelp() const
+	{
+		return nullptr;
+	}
 
 protected:
 	virtual void released(W_CONTEXT *, WIDGET_KEY = WKEY_PRIMARY) {}
@@ -163,15 +227,20 @@ protected:
 	virtual void display(int, int) {}
 	virtual void geometryChanged() {}
 
-	virtual bool hitTest(int x, int y);
+	virtual bool hitTest(int x, int y) const;
+
+	// handling mouse drag
+	virtual bool capturesMouseDrag(WIDGET_KEY) { return false; }
+	virtual void mouseDragged(WIDGET_KEY, W_CONTEXT *start, W_CONTEXT *current) {}
 
 public:
-	virtual unsigned getState();
+	virtual unsigned getState() const;
 	virtual void setState(unsigned state);
 	virtual void setFlash(bool enable);
 	virtual WzString getString() const;
 	virtual void setString(WzString string);
-	virtual void setTip(std::string string);
+	virtual void setTip(std::string string); // tooltip
+	virtual void setHelp(optional<WidgetHelp> help); // formatted help information for this UI element
 
 	virtual void screenSizeDidChange(int oldWidth, int oldHeight, int newWidth, int newHeight); // used to handle screen resizing
 
@@ -197,7 +266,7 @@ public:
 	{
 		return parentWidget.lock();
 	}
-	Children const &children()
+	Children const &children() const
 	{
 		return childWidgets;
 	}
@@ -283,8 +352,14 @@ public:
 		setGeometry(WzRect(x, y, w, h));
 	}
 	void setGeometry(WzRect const &r);
+	virtual void setGeometryFromScreenRect(WzRect const &r);
 
-	void attach(const std::shared_ptr<WIDGET> &widget);
+	enum class ChildZPos {
+		Front,
+		Back
+	};
+
+	void attach(const std::shared_ptr<WIDGET> &widget, ChildZPos zPos = ChildZPos::Front);
 	/**
 	 * @deprecated use `void WIDGET::attach(const std::shared_ptr<WIDGET> &widget)` instead
 	 **/
@@ -334,6 +409,8 @@ private:
 	WIDGET_CALCLAYOUT_FUNC  calcLayout;				///< Optional calc layout callback
 	WIDGET_ONDELETE_FUNC	onDelete;				///< Optional callback called when the Widget is about to be deleted
 	WIDGET_HITTEST_FUNC		customHitTest;			///< Optional hit-testing custom function
+protected:
+	friend struct W_SCREEN;
 	void setScreenPointer(const std::shared_ptr<W_SCREEN> &screen); ///< Set screen pointer for us and all children.
 public:
 	virtual bool processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wasPressed);
@@ -345,6 +422,7 @@ public:
 		WidgetGraphicsContext context;
 		displayRecursive(context);
 	}
+	static void processMouseDragEvent(const W_CONTEXT &sContext, WIDGET_KEY wkey, WIDGET_KEYSTATE* pState, bool alsoTriggerReleased);
 
 private:
 	std::weak_ptr<WIDGET> parentWidget;
@@ -413,13 +491,8 @@ public:
 	}
 
 private:
-#ifdef WZ_CXX11
 	W_SCREEN(W_SCREEN const &) = delete;
 	W_SCREEN &operator =(W_SCREEN const &) = delete;
-#else
-	W_SCREEN(W_SCREEN const &);  // Non-copyable.
-	W_SCREEN &operator =(W_SCREEN const &);  // Non-copyable.
-#endif
 };
 
 /* Context information to pass into the widget functions */
@@ -458,6 +531,21 @@ public:
 		*this = *other;
 	}
 	W_CONTEXT& operator=(const W_CONTEXT& other) = default;
+	inline bool operator== (const W_CONTEXT &b) const
+	{
+		return (xOffset == b.xOffset && yOffset == b.yOffset
+				&& mx == b.mx && my == b.my);
+	}
+public:
+	inline W_CONTEXT convertToScreenContext()
+	{
+		W_CONTEXT screenContext(*this);
+		screenContext.mx += screenContext.xOffset;
+		screenContext.my += screenContext.yOffset;
+		screenContext.xOffset = 0;
+		screenContext.yOffset = 0;
+		return screenContext;
+	}
 };
 
 #endif // __INCLUDED_LIB_WIDGET_WIDGBASE_H__

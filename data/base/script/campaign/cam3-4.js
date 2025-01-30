@@ -1,11 +1,11 @@
 include("script/campaign/libcampaign.js");
 include("script/campaign/templates.js");
 
-const NEXUS_RES = [
-	"R-Sys-Engineering03", "R-Defense-WallUpgrade11", "R-Struc-Materials11",
+const mis_nexusRes = [
+	"R-Sys-Engineering03", "R-Defense-WallUpgrade12", "R-Struc-Materials11",
 	"R-Struc-VTOLPad-Upgrade06", "R-Wpn-Bomb-Damage03", "R-Sys-NEXUSrepair",
 	"R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02", "R-Cyborg-Legs02",
-	"R-Wpn-Mortar-Acc03", "R-Wpn-MG-Damage09", "R-Wpn-Mortar-ROF04",
+	"R-Wpn-Mortar-Acc03", "R-Wpn-MG-Damage10", "R-Wpn-Mortar-ROF04",
 	"R-Vehicle-Engine09", "R-Vehicle-Metals11", "R-Vehicle-Armor-Heat08",
 	"R-Cyborg-Metals11", "R-Cyborg-Armor-Heat08", "R-Wpn-RocketSlow-ROF06",
 	"R-Wpn-AAGun-Damage06", "R-Wpn-AAGun-ROF06", "R-Wpn-Howitzer-Damage09",
@@ -13,12 +13,23 @@ const NEXUS_RES = [
 	"R-Wpn-Missile-Damage03", "R-Wpn-Missile-ROF03", "R-Wpn-Missile-Accuracy02",
 	"R-Wpn-Rail-Damage03", "R-Wpn-Rail-ROF03", "R-Wpn-Rail-Accuracy01",
 	"R-Wpn-Energy-Damage03", "R-Wpn-Energy-ROF03", "R-Wpn-Energy-Accuracy01",
-	"R-Wpn-AAGun-Accuracy03", "R-Wpn-Howitzer-Accuracy03",
+	"R-Wpn-AAGun-Accuracy03", "R-Wpn-Howitzer-Accuracy03", "R-Sys-NEXUSsensor",
+];
+const mis_nexusResClassic = [
+	"R-Defense-WallUpgrade09", "R-Struc-Materials09", "R-Struc-Factory-Upgrade06",
+	"R-Struc-VTOLPad-Upgrade06", "R-Vehicle-Engine09", "R-Vehicle-Metals09",
+	"R-Cyborg-Metals09", "R-Vehicle-Armor-Heat06", "R-Cyborg-Armor-Heat06",
+	"R-Sys-Engineering03", "R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02",
+	"R-Wpn-Bomb-Damage03", "R-Wpn-Energy-Accuracy01", "R-Wpn-Energy-Damage03",
+	"R-Wpn-Energy-ROF03", "R-Wpn-Missile-Accuracy02", "R-Wpn-Missile-Damage03",
+	"R-Wpn-Missile-ROF03", "R-Wpn-Rail-Accuracy01", "R-Wpn-Rail-Damage03",
+	"R-Wpn-Rail-ROF03", "R-Sys-Sensor-Upgrade01", "R-Sys-NEXUSrepair",
+	"R-Wpn-Flamer-Damage06", "R-Sys-NEXUSsensor",
 ];
 
 function eventDestroyed(obj)
 {
-	if (obj.player === NEXUS && obj.type === STRUCTURE && obj.stattype === HQ)
+	if (camGetNexusState() && obj.player === CAM_NEXUS && obj.type === STRUCTURE && obj.stattype === HQ)
 	{
 		camSetNexusState(false);
 		removeTimer("nexusHackFeature");
@@ -43,33 +54,79 @@ camAreaEvent("factoryTriggerS", function() {
 
 function nexusHackFeature()
 {
-	let hackFailChance = 60;
+	let hackFailChance = 0;
+
+	switch (difficulty)
+	{
+		case SUPEREASY: hackFailChance = 95; break;
+		case EASY: hackFailChance = 85; break;
+		case MEDIUM: hackFailChance = 75; break;
+		case HARD: hackFailChance = 65; break;
+		case INSANE: hackFailChance = 55; break;
+		default: hackFailChance = 70;
+	}
 
 	if (camRand(100) < hackFailChance)
 	{
 		return;
 	}
 
-	camHackIntoPlayer(CAM_HUMAN_PLAYER, NEXUS);
+	camHackIntoPlayer(CAM_HUMAN_PLAYER, CAM_NEXUS);
 }
 
 // A little suprise absorbption attack when discovering the SW base.
-function firstAbsorbAttack()
+function takeoverChanceAttack()
 {
-	var objects = enumArea(0, 0, mapWidth, mapHeight, CAM_HUMAN_PLAYER, false).filter(function(obj) {
-		return (obj.type !== DROID) || (obj.type === DROID && obj.droidType !== DROID_SUPERTRANSPORTER);
-	});
-
-	for (var i = 0, len = objects.length; i < len; ++i)
+	let chance = 0;
+	switch (difficulty)
 	{
-		var obj = objects[i];
-		//Destroy all the VTOLs to prevent a player from instantly defeating the HQ in a rush.
-		if (obj.type === DROID && isVTOL(obj))
+		case SUPEREASY: chance = 1; break;
+		case EASY: chance = 3; break;
+		case MEDIUM: chance = 5; break;
+		case HARD: chance = 7; break;
+		case INSANE: chance = 9; break;
+		default: chance = 5;
+	}
+
+	const objects = enumArea(0, 0, mapWidth, mapHeight, CAM_HUMAN_PLAYER, false).filter((obj) => (
+		(obj.type !== DROID) || (obj.type === DROID && obj.droidType !== DROID_SUPERTRANSPORTER)
+	));
+
+	for (let i = 0, len = objects.length; i < len; ++i)
+	{
+		const obj = objects[i];
+		if (obj.type === DROID && obj.droidType === DROID_COMMAND)
 		{
-			camSafeRemoveObject(obj, true);
-			continue;
+			continue; //A little too hectic to take a Commander immediately.
 		}
-		if ((camRand(100) < 10) && !donateObject(obj, NEXUS))
+		if (camRand(100) < chance)
+		{
+			if (obj.type === STRUCTURE && obj.stattype === WALL)
+			{
+				camSafeRemoveObject(obj, true); // Just remove walls and tank traps.
+			}
+			else if (!donateObject(obj, CAM_NEXUS))
+			{
+				camSafeRemoveObject(obj, true); // If can't transfer then get rid of it too.
+			}
+		}
+	}
+}
+
+function destroyPlayerVtols()
+{
+	const hq = getObject("NX-HQ");
+	if (hq === null)
+	{
+		removeTimer("destroyPlayerVtols");
+		return;
+	}
+	const __SCAN_RADIUS = 11;
+	const objects = enumRange(hq.x, hq.y, __SCAN_RADIUS, CAM_HUMAN_PLAYER, false);
+	for (let i = 0, len = objects.length; i < len; ++i)
+	{
+		const obj = objects[i];
+		if (obj.type === DROID && isVTOL(obj))
 		{
 			camSafeRemoveObject(obj, true);
 		}
@@ -78,16 +135,29 @@ function firstAbsorbAttack()
 
 function activateNexus()
 {
-	camSetExtraObjectiveMessage(_("Destroy the Nexus HQ to disable the Nexus Intruder Program"));
-	playSound(SYNAPTICS_ACTIVATED);
+	const HINT_TIP = _("Destroy the Nexus HQ to disable the Nexus Intruder Program");
+	const HINT_TIP_WARN = _("Warning: HQ shielded against VTOL attacks");
+	const objectiveMessages = [HINT_TIP, HINT_TIP_WARN];
+	camSetExtraObjectiveMessage(objectiveMessages);
+	playSound(cam_sounds.nexus.synapticLinksActivated);
 	camSetNexusState(true);
-	setTimer("nexusHackFeature", camSecondsToMilliseconds((difficulty <= MEDIUM) ? 20 : 10));
+	setTimer("nexusHackFeature", camSecondsToMilliseconds((difficulty <= EASY) ? 20 : 10));
+	setTimer("destroyPlayerVtols", camSecondsToMilliseconds(0.2));
 }
 
 function camEnemyBaseDetected_NX_SWBase()
 {
+	if (camClassicMode())
+	{
+		return;
+	}
+	if (getObject("NX-HQ") === null)
+	{
+		return; //Probably destroyed through cheats?
+	}
 	camPlayVideos({video: "MB3_4_MSG4", type: MISS_MSG});
-	firstAbsorbAttack(); //before Nexus state activation to prevent sound spam.
+	//Do these before Nexus state activation to prevent sound spam.
+	queue("takeoverChanceAttack", camSecondsToMilliseconds(0.5));
 	queue("activateNexus", camSecondsToMilliseconds(1));
 }
 
@@ -142,15 +212,15 @@ function setupNexusPatrols()
 
 function enableAllFactories()
 {
-	const FACTORY_LIST = [
+	const factoryList = [
 		"NX-NWFactory1", "NX-NWFactory2", "NX-NEFactory", "NX-SWFactory",
 		"NX-SEFactory", "NX-VtolFactory1", "NX-NWCyborgFactory",
 		"NX-VtolFactory2", "NX-SWCyborgFactory1", "NX-SWCyborgFactory2",
 	];
 
-	for (var i = 0, l = FACTORY_LIST.length; i < l; ++i)
+	for (let i = 0, l = factoryList.length; i < l; ++i)
 	{
-		camEnableFactory(FACTORY_LIST[i]);
+		camEnableFactory(factoryList[i]);
 	}
 
 	//Set the already placed VTOL fighters into action
@@ -161,18 +231,18 @@ function enableAllFactories()
 
 function truckDefense()
 {
-	var truckNum = countDroid(NEXUS, DROID_CONSTRUCT);
-	if (truckNum > 0)
+	const TRUCK_NUM = countDroid(CAM_NEXUS, DROID_CONSTRUCT);
+	if (TRUCK_NUM > 0)
 	{
-		var list = [
+		const list = [
 			"Sys-NEXUSLinkTOW", "P0-AASite-SAM2", "Emplacement-PrisLas",
-			"NX-Tower-ATMiss", "Sys-NX-CBTower", "Emplacement-HvART-pit",
-			"Sys-SensoTower02"
+			"NX-Tower-ATMiss", "Sys-NX-CBTower", "NX-Emp-MultiArtMiss-Pit",
+			"Sys-NX-SensorTower"
 		];
 
-		for (var i = 0; i < truckNum; ++i)
+		for (let i = 0; i < TRUCK_NUM; ++i)
 		{
-			camQueueBuilding(NEXUS, list[camRand(list.length)]);
+			camQueueBuilding(CAM_NEXUS, list[camRand(list.length)]);
 		}
 	}
 	else
@@ -183,9 +253,9 @@ function truckDefense()
 
 function eventStartLevel()
 {
-	var startpos = getObject("startPosition");
-	var tpos = getObject("transportEntryExit");
-	var lz = getObject("landingZone");
+	const startPos = getObject("startPosition");
+	const tpos = getObject("transportEntryExit");
+	const lz = getObject("landingZone");
 
 	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, CAM_GAMMA_OUT, {
 		area: "RTLZ",
@@ -193,18 +263,28 @@ function eventStartLevel()
 		annihilate: true
 	});
 
-	centreView(startpos.x, startpos.y);
+	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
 	startTransporterEntry(tpos.x, tpos.y, CAM_HUMAN_PLAYER);
 	setTransporterExit(tpos.x, tpos.y, CAM_HUMAN_PLAYER);
 	setMissionTime(-1); //Infinite time
 
-	var enemyLz = getObject("NXlandingZone");
-	setNoGoArea(enemyLz.x, enemyLz.y, enemyLz.x2, enemyLz.y2, NEXUS);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_nexusResClassic, CAM_NEXUS);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
 
-	camCompleteRequiredResearch(NEXUS_RES, NEXUS);
+		if (difficulty === INSANE)
+		{
+			completeResearch("R-Defense-WallUpgrade13", CAM_NEXUS);
+		}
+	}
+
 	setupNexusPatrols();
-	camManageTrucks(NEXUS);
+	camManageTrucks(CAM_NEXUS);
 
 	camSetArtifacts({
 		"NX-NWCyborgFactory": { tech: "R-Wpn-RailGun03" },
@@ -216,38 +296,38 @@ function eventStartLevel()
 		"NX_SWBase": {
 			cleanup: "SWBaseCleanup",
 			detectMsg: "CM34_OBJ2",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NX_NWBase": {
 			cleanup: "NWBaseCleanup",
 			detectMsg: "CM34_BASEA",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NX_NEBase": {
 			cleanup: "NEBaseCleanup",
 			detectMsg: "CM34_BASEB",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NX_WBase": {
 			cleanup: "WBaseCleanup",
 			detectMsg: "CM34_BASEC",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NX_SEBase": {
 			cleanup: "SEBaseCleanup",
 			detectMsg: "CM34_BASED",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NX_VtolBase": {
 			cleanup: "vtolBaseCleanup",
 			detectMsg: "CM34_BASEE",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 	});
 
@@ -390,5 +470,5 @@ function eventStartLevel()
 	hackAddMessage("CM34_OBJ1", PROX_MSG, CAM_HUMAN_PLAYER);
 
 	queue("enableAllFactories", camChangeOnDiff(camMinutesToMilliseconds(5)));
-	setTimer("truckDefense", camChangeOnDiff(camMinutesToMilliseconds(15)));
+	setTimer("truckDefense", camMinutesToMilliseconds(20));
 }

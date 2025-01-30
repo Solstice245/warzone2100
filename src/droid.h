@@ -24,13 +24,14 @@
 #ifndef __INCLUDED_SRC_DROID_H__
 #define __INCLUDED_SRC_DROID_H__
 
+#include "lib/framework/paged_entity_container.h"
 #include "lib/framework/string_ext.h"
 #include "lib/gamelib/gtime.h"
 
 #include "objectdef.h"
 #include "stats.h"
-#include "visibility.h"
 #include "selection.h"
+#include "objmem.h"
 
 #include <queue>
 
@@ -62,6 +63,7 @@ enum PICKTILE
 extern DROID	*psLastDroidHit;
 
 std::priority_queue<int> copy_experience_queue(int player);
+int getTopExperience(int player);
 void add_to_experience_queue(int player, int value);
 
 // initialise droid module
@@ -81,6 +83,7 @@ struct INITIAL_DROID_ORDERS
 DROID *buildDroid(DROID_TEMPLATE *pTemplate, UDWORD x, UDWORD y, UDWORD player, bool onMission, const INITIAL_DROID_ORDERS *initialOrders, Rotation rot = Rotation());
 /// Creates a droid locally, instead of sending a message, even if the bMultiMessages HACK is set to true.
 DROID *reallyBuildDroid(const DROID_TEMPLATE *pTemplate, Position pos, UDWORD player, bool onMission, Rotation rot = Rotation());
+DROID *reallyBuildDroid(const DROID_TEMPLATE *pTemplate, Position pos, UDWORD player, bool onMission, Rotation rot, uint32_t id);
 
 /* Set the asBits in a DROID structure given it's template. */
 void droidSetBits(const DROID_TEMPLATE *pTemplate, DROID *psDroid);
@@ -92,7 +95,7 @@ UDWORD calcDroidWeight(const DROID_TEMPLATE *psTemplate);
 UDWORD calcDroidPower(const DROID *psDroid);
 
 // Calculate the number of points required to build a droid
-UDWORD calcDroidPoints(DROID *psDroid);
+UDWORD calcDroidPoints(const DROID *psDroid);
 
 /* Calculate the body points of a droid from it's template */
 UDWORD calcTemplateBody(const DROID_TEMPLATE *psTemplate, UBYTE player);
@@ -109,11 +112,8 @@ UDWORD calcTemplateBuild(const DROID_TEMPLATE *psTemplate);
 /* Calculate the power points required to build/maintain the droid */
 UDWORD calcTemplatePower(const DROID_TEMPLATE *psTemplate);
 
-// return whether a droid is IDF
-bool idfDroid(DROID *psDroid);
-
 /* Do damage to a droid */
-int32_t droidDamage(DROID *psDroid, unsigned damage, WEAPON_CLASS weaponClass, WEAPON_SUBCLASS weaponSubClass, unsigned impactTime, bool isDamagePerSecond, int minDamage);
+int32_t droidDamage(DROID *psDroid, unsigned damage, WEAPON_CLASS weaponClass, WEAPON_SUBCLASS weaponSubClass, unsigned impactTime, bool isDamagePerSecond, int minDamage, bool empRadiusHit);
 
 /* The main update routine for all droids */
 void droidUpdate(DROID *psDroid);
@@ -154,19 +154,19 @@ void vanishDroid(DROID *psDel);
 
 /* Remove a droid from the apsDroidLists so doesn't update or get drawn etc*/
 //returns true if successfully removed from the list
-bool droidRemove(DROID *psDroid, DROID *pList[MAX_PLAYERS]);
+bool droidRemove(DROID *psDroid, PerPlayerDroidLists& pList);
 
 //free the storage for the droid templates
 bool droidTemplateShutDown();
 
 /* Return the type of a droid */
-DROID_TYPE droidType(DROID *psDroid);
+DROID_TYPE droidType(const DROID *psDroid);
 
 /* Return the type of a droid from it's template */
 DROID_TYPE droidTemplateType(const DROID_TEMPLATE *psTemplate);
 
-void assignDroidsToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGroup);
-void removeDroidsFromGroup(UDWORD playerNumber);
+void assignObjectToGroup(UDWORD	playerNumber, UDWORD groupNumber, bool clearGroup);
+void removeObjectFromGroup(UDWORD playerNumber);
 
 bool activateNoGroup(UDWORD playerNumber, const SELECTIONTYPE selectionType, const SELECTION_CLASS selectionClass, const bool bOnScreen);
 
@@ -182,8 +182,12 @@ bool calcDroidMuzzleBaseLocation(const DROID *psDroid, Vector3i *muzzle, int wea
 
 /* Droid experience stuff */
 unsigned int getDroidLevel(const DROID *psDroid);
+unsigned int getDroidLevel(unsigned int experience, uint8_t player, uint8_t brainComponent);
 UDWORD getDroidEffectiveLevel(const DROID *psDroid);
 const char *getDroidLevelName(const DROID *psDroid);
+// Increase the experience of a droid (and handle events, if needed).
+void droidIncreaseExperience(DROID *psDroid, uint32_t experienceInc);
+void giveExperienceForSquish(DROID *psDroid);
 
 // Get a droid's name.
 const char *droidGetName(const DROID *psDroid);
@@ -206,19 +210,16 @@ bool pickATileGenThreat(UDWORD *x, UDWORD *y, UBYTE numIterations, SDWORD threat
 void initDroidMovement(DROID *psDroid);
 
 /// Looks through the players list of droids to see if any of them are building the specified structure - returns true if finds one
-bool checkDroidsBuilding(STRUCTURE *psStructure);
+bool checkDroidsBuilding(const STRUCTURE *psStructure);
 
 /// Looks through the players list of droids to see if any of them are demolishing the specified structure - returns true if finds one
-bool checkDroidsDemolishing(STRUCTURE *psStructure);
+bool checkDroidsDemolishing(const STRUCTURE *psStructure);
 
 /// Returns the next module which can be built after lastOrderedModule, or returns 0 if not possible.
 int nextModuleToBuild(STRUCTURE const *psStruct, int lastOrderedModule);
 
 /// Deals with building a module - checking if any droid is currently doing this if so, helping to build the current one
 void setUpBuildModule(DROID *psDroid);
-
-/// Just returns true if the droid's present body points aren't as high as the original
-bool droidIsDamaged(const DROID *psDroid);
 
 char const *getDroidResourceName(char const *pName);
 
@@ -235,12 +236,7 @@ UBYTE checkCommandExist(UBYTE player);
  BASE_OBJECT *checkForRepairRange(DROID *psDroid, DROID *psTarget);
 
 // Returns true if the droid is a transporter.
-bool isTransporter(DROID const *psDroid);
 bool isTransporter(DROID_TEMPLATE const *psTemplate);
-/// Returns true if the droid has VTOL propulsion, and is not a transport.
-bool isVtolDroid(const DROID *psDroid);
-/// Returns true if the droid has VTOL propulsion and is moving.
-bool isFlying(const DROID *psDroid);
 /*returns true if a VTOL weapon droid which has completed all runs*/
 bool vtolEmpty(const DROID *psDroid);
 /*returns true if a VTOL weapon droid which still has full ammo*/
@@ -255,11 +251,10 @@ UWORD   getNumAttackRuns(const DROID *psDroid, int weapon_slot);
 //assign rearmPad to the VTOL
 void assignVTOLPad(DROID *psNewDroid, STRUCTURE *psReArmPad);
 // true if a vtol is waiting to be rearmed by a particular rearm pad
-bool vtolReadyToRearm(DROID *psDroid, STRUCTURE *psStruct);
-// true if a vtol droid currently returning to be rearmed
-bool vtolRearming(const DROID *psDroid);
-// true if a droid is currently attacking
-bool droidAttacking(const DROID *psDroid);
+bool vtolReadyToRearm(const DROID *psDroid, const STRUCTURE *psStruct);
+// Fill all the weapons on a VTOL droid.
+void fillVtolDroid(DROID *psDroid);
+
 // see if there are any other vtols attacking the same target
 // but still rearming
 bool allVtolsRearmed(const DROID *psDroid);
@@ -274,13 +269,10 @@ bool cbSensorDroid(const DROID *psDroid);
 bool standardSensorDroid(const DROID *psDroid);
 
 // give a droid from one player to another - used in Electronic Warfare and multiplayer
- DROID *giftSingleDroid(DROID *psD, UDWORD to, bool electronic = false);
-
-/// Calculates the electronic resistance of a droid based on its experience level
-SWORD droidResistance(const DROID *psDroid);
+ DROID *giftSingleDroid(DROID *psD, UDWORD to, bool electronic = false, Vector2i pos = {0, 0});
 
 /// This is called to check the weapon is allowed
-bool checkValidWeaponForProp(DROID_TEMPLATE *psTemplate);
+bool checkValidWeaponForProp(const DROID_TEMPLATE *psTemplate);
 
 const char *getDroidNameForRank(UDWORD rank);
 
@@ -291,7 +283,10 @@ void deleteTemplateFromProduction(DROID_TEMPLATE *psTemplate, unsigned player, Q
 bool isSelectable(DROID const *psDroid);
 
 // Select a droid and do any necessary housekeeping.
-void SelectDroid(DROID *psDroid);
+void SelectDroid(DROID *psDroid, bool programmaticSelection = false);
+
+// If all other droids with psGroupDroid's group are selected, add psGroupDroid to the selection after production/repair/etc.
+void SelectGroupDroid(DROID *psGroupDroid);
 
 // De-select a droid and do any necessary housekeeping.
 void DeSelectDroid(DROID *psDroid);
@@ -299,10 +294,6 @@ void DeSelectDroid(DROID *psDroid);
 /* audio finished callback */
 bool droidAudioTrackStopped(void *psObj);
 
-/*returns true if droid type is one of the Cyborg types*/
-bool cyborgDroid(const DROID *psDroid);
-
-bool isConstructionDroid(DROID const *psDroid);
 bool isConstructionDroid(BASE_OBJECT const *psObject);
 
 /** Check if droid is in a legal world position and is not on its way to drive off the map. */
@@ -313,52 +304,12 @@ void droidSetPosition(DROID *psDroid, int x, int y);
 /// Return a percentage of how fully armed the object is, or -1 if N/A.
 int droidReloadBar(const BASE_OBJECT *psObj, const WEAPON *psWeap, int weapon_slot);
 
+// from visibility.h
+extern int objSensorRange(const BASE_OBJECT* psObj);
+
 static inline int droidSensorRange(const DROID *psDroid)
 {
 	return objSensorRange((const BASE_OBJECT *)psDroid);
-}
-
-/*
- * Component stat helper functions
- */
-static inline BODY_STATS *getBodyStats(const DROID *psDroid)
-{
-	return asBodyStats + psDroid->asBits[COMP_BODY];
-}
-
-static inline BRAIN_STATS *getBrainStats(const DROID *psDroid)
-{
-	return asBrainStats + psDroid->asBits[COMP_BRAIN];
-}
-
-static inline PROPULSION_STATS *getPropulsionStats(const DROID *psDroid)
-{
-	return asPropulsionStats + psDroid->asBits[COMP_PROPULSION];
-}
-
-static inline SENSOR_STATS *getSensorStats(const DROID *psDroid)
-{
-	return asSensorStats + psDroid->asBits[COMP_SENSOR];
-}
-
-static inline ECM_STATS *getECMStats(const DROID *psDroid)
-{
-	return asECMStats + psDroid->asBits[COMP_ECM];
-}
-
-static inline REPAIR_STATS *getRepairStats(const DROID *psDroid)
-{
-	return asRepairStats + psDroid->asBits[COMP_REPAIRUNIT];
-}
-
-static inline CONSTRUCT_STATS *getConstructStats(const DROID *psDroid)
-{
-	return asConstructStats + psDroid->asBits[COMP_CONSTRUCT];
-}
-
-static inline WEAPON_STATS *getWeaponStats(const DROID *psDroid, int weapon_slot)
-{
-	return asWeaponStats + psDroid->asWeaps[weapon_slot].nStat;
 }
 
 static inline Rotation getInterpolatedWeaponRotation(const DROID *psDroid, int weaponSlot, uint32_t time)
@@ -449,7 +400,7 @@ void checkDroid(const DROID *droid, const char *const location_description, cons
 #define CHECK_DROID(droid) checkDroid(droid, AT_MACRO, __FUNCTION__, max_check_object_recursion)
 
 /** If droid can get to given object using its current propulsion, return the square distance. Otherwise return -1. */
-int droidSqDist(DROID *psDroid, BASE_OBJECT *psObj);
+int droidSqDist(const DROID *psDroid, const BASE_OBJECT *psObj);
 
 // Minimum damage a weapon will deal to its target
 #define	MIN_WEAPON_DAMAGE	1
@@ -460,7 +411,6 @@ void cancelBuild(DROID *psDroid);
 
 #define syncDebugDroid(psDroid, ch) _syncDebugDroid(__FUNCTION__, psDroid, ch)
 void _syncDebugDroid(const char *function, DROID const *psDroid, char ch);
-
 
 // True iff object is a droid.
 static inline bool isDroid(SIMPLE_OBJECT const *psObject)
@@ -478,5 +428,15 @@ static inline DROID const *castDroid(SIMPLE_OBJECT const *psObject)
 	return isDroid(psObject) ? (DROID const *)psObject : (DROID const *)nullptr;
 }
 
+/** \brief sends droid to delivery point, or back to commander. psRepairFac maybe nullptr when
+ * repairs were made by a mobile repair turret
+ */
+void droidWasFullyRepaired(DROID *psDroid, const REPAIR_FACILITY *psRepairFac);
+
+// Split the droid storage into pages containing 256 droids, disable slot reuse
+// to guard against memory-related issues when some object pointers won't get
+// updated properly, e.g. when transitioning between the base and offworld missions.
+using DroidContainer = PagedEntityContainer<DROID, 256, false>;
+DroidContainer& GlobalDroidContainer();
 
 #endif // __INCLUDED_SRC_DROID_H__

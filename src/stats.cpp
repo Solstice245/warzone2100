@@ -39,6 +39,7 @@
 #include "lib/sound/audio_id.h"
 #include "projectile.h"
 #include "text.h"
+#include "notifications.h"
 #include <unordered_map>
 
 #define WEAPON_TIME		100
@@ -46,30 +47,20 @@
 #define DEFAULT_DROID_RESISTANCE	150
 
 /* The stores for the different stats */
-BODY_STATS		*asBodyStats;
-BRAIN_STATS		*asBrainStats;
-PROPULSION_STATS	*asPropulsionStats;
-SENSOR_STATS		*asSensorStats;
-ECM_STATS		*asECMStats;
-REPAIR_STATS		*asRepairStats;
-WEAPON_STATS		*asWeaponStats;
-CONSTRUCT_STATS		*asConstructStats;
+std::vector<BODY_STATS> asBodyStats;
+std::vector<BRAIN_STATS> asBrainStats;
+std::vector<PROPULSION_STATS> asPropulsionStats;
+std::vector<SENSOR_STATS> asSensorStats;
+std::vector<ECM_STATS> asECMStats;
+std::vector<REPAIR_STATS> asRepairStats;
+std::vector<WEAPON_STATS> asWeaponStats;
+std::vector<CONSTRUCT_STATS> asConstructStats;
 std::vector<PROPULSION_TYPES> asPropulsionTypes;
 static int		*asTerrainTable;
 
 //used to hold the modifiers cross refd by weapon effect and propulsion type
 WEAPON_MODIFIER		asWeaponModifier[WE_NUMEFFECTS][PROPULSION_TYPE_NUM];
 WEAPON_MODIFIER		asWeaponModifierBody[WE_NUMEFFECTS][SIZE_NUM];
-
-/* The number of different stats stored */
-UDWORD		numBodyStats;
-UDWORD		numBrainStats;
-UDWORD		numPropulsionStats;
-UDWORD		numSensorStats;
-UDWORD		numECMStats;
-UDWORD		numRepairStats;
-UDWORD		numWeaponStats;
-UDWORD		numConstructStats;
 
 //stores for each players component states - can be either UNAVAILABLE, REDUNDANT, FOUND or AVAILABLE
 UBYTE		*apCompLists[MAX_PLAYERS][COMP_NUMCOMPONENTS];
@@ -79,6 +70,7 @@ UBYTE		*apStructTypeLists[MAX_PLAYERS];
 
 static std::unordered_map<WzString, BASE_STATS *> lookupStatPtr;
 static std::unordered_map<WzString, COMPONENT_STATS *> lookupCompStatPtr;
+static size_t statModelLoadingFailures = 0;
 
 static bool getMovementModel(const WzString &movementModel, MOVEMENT_MODEL *model);
 static bool statsGetAudioIDFromString(const WzString &szStatName, const WzString &szWavName, int *piWavID);
@@ -104,31 +96,11 @@ static void deallocTerrainTable()
 *******************************************************************************/
 
 /* Macro to allocate memory for a set of stats */
-#define ALLOC_STATS(numEntries, list, listSize, type) \
+#define ALLOC_STATS(numEntries, list, type) \
 	ASSERT((numEntries) < ~STAT_MASK + 1, "Number of stats entries too large for " #type);\
-	if ((list))	delete [] (list);	\
-	(list) = new type[numEntries]; \
-	(listSize) = (numEntries); \
+	if (!list.empty()) list.clear(); \
+	list.resize(numEntries); \
 	return true
-
-/*Macro to Deallocate stats*/
-#define STATS_DEALLOC(list, listSize) \
-	delete [] (list); \
-	listSize = 0; \
-	(list) = NULL
-
-void statsInitVars()
-{
-	/* The number of different stats stored */
-	numBodyStats = 0;
-	numBrainStats = 0;
-	numPropulsionStats = 0;
-	numSensorStats = 0;
-	numECMStats = 0;
-	numRepairStats = 0;
-	numWeaponStats = 0;
-	numConstructStats = 0;
-}
 
 /*Deallocate all the stats assigned from input data*/
 bool statsShutDown()
@@ -136,20 +108,26 @@ bool statsShutDown()
 	lookupStatPtr.clear();
 	lookupCompStatPtr.clear();
 
-	STATS_DEALLOC(asWeaponStats, numWeaponStats);
-	STATS_DEALLOC(asBrainStats, numBrainStats);
-	STATS_DEALLOC(asPropulsionStats, numPropulsionStats);
-	STATS_DEALLOC(asRepairStats, numRepairStats);
-	STATS_DEALLOC(asConstructStats, numConstructStats);
-	STATS_DEALLOC(asECMStats, numECMStats);
-	STATS_DEALLOC(asSensorStats, numSensorStats);
-	STATS_DEALLOC(asBodyStats, numBodyStats);
+	asWeaponStats.clear();
+	asBrainStats.clear();
+	asPropulsionStats.clear();
+	asRepairStats.clear();
+	asConstructStats.clear();
+	asECMStats.clear();
+	asSensorStats.clear();
+	asBodyStats.clear();
 	deallocPropulsionTypes();
 	deallocTerrainTable();
+
+	statModelLoadingFailures = 0;
 
 	return true;
 }
 
+size_t getStatModelLoadingFailures()
+{
+	return statModelLoadingFailures;
+}
 
 /*******************************************************************************
 *		Allocate stats functions
@@ -157,59 +135,122 @@ bool statsShutDown()
 /* Allocate Weapon stats */
 bool statsAllocWeapons(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asWeaponStats, numWeaponStats, WEAPON_STATS);
+	ALLOC_STATS(numStats, asWeaponStats, WEAPON_STATS);
 }
 /* Allocate Body Stats */
 bool statsAllocBody(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asBodyStats, numBodyStats, BODY_STATS);
+	ALLOC_STATS(numStats, asBodyStats, BODY_STATS);
 }
 /* Allocate Brain Stats */
 bool statsAllocBrain(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asBrainStats, numBrainStats, BRAIN_STATS);
+	ALLOC_STATS(numStats, asBrainStats, BRAIN_STATS);
 }
 /* Allocate Propulsion Stats */
 bool statsAllocPropulsion(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asPropulsionStats, numPropulsionStats, PROPULSION_STATS);
+	ALLOC_STATS(numStats, asPropulsionStats, PROPULSION_STATS);
 }
 /* Allocate Sensor Stats */
 bool statsAllocSensor(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asSensorStats, numSensorStats, SENSOR_STATS);
+	ALLOC_STATS(numStats, asSensorStats, SENSOR_STATS);
 }
 /* Allocate Ecm Stats */
 bool statsAllocECM(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asECMStats, numECMStats, ECM_STATS);
+	ALLOC_STATS(numStats, asECMStats, ECM_STATS);
 }
 
 /* Allocate Repair Stats */
 bool statsAllocRepair(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asRepairStats, numRepairStats, REPAIR_STATS);
+	ALLOC_STATS(numStats, asRepairStats, REPAIR_STATS);
 }
 
 /* Allocate Construct Stats */
 bool statsAllocConstruct(UDWORD	numStats)
 {
-	ALLOC_STATS(numStats, asConstructStats, numConstructStats, CONSTRUCT_STATS);
+	ALLOC_STATS(numStats, asConstructStats, CONSTRUCT_STATS);
 }
 
 /*******************************************************************************
 *		Load stats functions
 *******************************************************************************/
 
-static iIMDShape *statsGetIMD(WzConfig &json, BASE_STATS *psStats, const WzString& key, const WzString& key2 = WzString())
+static optional<WzString> deprecatedModelUpgrade(WzString& filename)
 {
-	iIMDShape *retval = nullptr;
+	static const std::unordered_map<WzString, WzString> deprecatedModelNames = {
+		// base
+		{"mibnkdrl.pie", "mibnkdr.pie"},
+		{"mibnkdrr.pie", ""},
+		{"prhlhtr3.pie", "prhhtr3.pie"},
+		{"prhrhtr3.pie", ""},
+		{"prhltrk3.pie", "prhtrk3.pie"},
+		{"prhrtrk3.pie", ""},
+		{"prhlvtl1.pie", "prhvtl1.pie"},
+		{"prhrvtl1.pie", ""},
+		{"prhlvtl1.pie", "prhvtl1.pie"},
+		{"prhrvtl1.pie", ""},
+		{"prhlvtl2.pie", "prhvtl2.pie"},
+		{"prhrvtl2.pie", ""},
+		{"prhlvtl3.pie", "prhvtl3.pie"},
+		{"prhrvtl3.pie", ""},
+		{"prhlvtl4.pie", "prhvtl4.pie"},
+		{"prhrvtl4.pie", ""},
+		{"prhlwhl1.pie", "prhwhl1.pie"},
+		{"prhrwhl1.pie", ""},
+		{"prllhtr1.pie", "prlhtr1.pie"},
+		{"prlrhtr1.pie", ""},
+		{"prlltrk1.pie", "prltrk1.pie"},
+		{"prlrtrk1.pie", ""},
+		{"prllvtl1.pie", "prlvtl1.pie"},
+		{"prlrvtl1.pie", ""},
+		{"prllvtl2.pie", "prlvtl2.pie"},
+		{"prlrvtl2.pie", ""},
+		{"prllvtl3.pie", "prlvtl3.pie"},
+		{"prlrvtl3.pie", ""},
+		{"prllwhl1.pie", "prlwhl1.pie"},
+		{"prlrwhl1.pie", ""},
+		{"prmlhtr2.pie", "prmhtr2.pie"},
+		{"prmrhtr2.pie", ""},
+		{"prmltrk2.pie", "prmtrk2.pie"},
+		{"prmrtrk2.pie", ""},
+		{"prmlvtl1.pie", "prmvtl1.pie"},
+		{"prmrvtl1.pie", ""},
+		{"prmlwhl1.pie", "prmwhl1.pie"},
+		{"prmrwhl1.pie", ""},
+		// mp
+		{"prslwhl1.pie", "prswhl1.pie"},
+		{"prsrwhl1.pie", ""},
+		{"prslvtl1.pie", "prsvtl1.pie"},
+		{"prsrvtl1.pie", ""},
+		{"prsltrk4.pie", "prstrk4.pie"},
+		{"prsrtrk4.pie", ""},
+		{"prslhtr4.pie", "prshtr4.pie"},
+		{"prsrhtr4.pie", ""},
+	};
+
+	WzString name(filename.toLower());
+	auto it = deprecatedModelNames.find(name);
+	if (it != deprecatedModelNames.end())
+	{
+		debug(LOG_INFO, "Deprecation notice: The model \"%s\" is referenced in a mod's stats JSON file, and is deprecated. Please check the latest base stats models for how to update this mod for future compatibility.", name.toUtf8().c_str());
+		return it->second;
+	}
+	return nullopt;
+}
+
+static iIMDBaseShape *statsGetIMD(WzConfig &json, BASE_STATS *psStats, const WzString& key, const WzString& key2 = WzString())
+{
+	iIMDBaseShape *retval = nullptr;
 	if (json.contains(key))
 	{
 		auto value = json.json(key);
 		if (value.is_object())
 		{
-			ASSERT(!key2.isEmpty(), "Cannot look up a JSON object with an empty key!");
+			ASSERT_OR_RETURN(nullptr, !key2.isEmpty(), "Cannot look up a JSON object with an empty key!");
 			auto obj = value;
 			if (obj.find(key2.toUtf8()) == obj.end())
 			{
@@ -218,7 +259,12 @@ static iIMDShape *statsGetIMD(WzConfig &json, BASE_STATS *psStats, const WzStrin
 			value = obj[key2.toUtf8()];
 		}
 		WzString filename = json_variant(value).toWzString();
+		deprecatedModelUpgrade(filename); // FUTURE TODO: Use output of this to auto-upgrade old model references? (Check for empty string)
 		retval = modelGet(filename);
+		if (retval == nullptr)
+		{
+			++statModelLoadingFailures;
+		}
 		ASSERT(retval != nullptr, "Cannot find the PIE model %s for stat %s in %s",
 		       filename.toUtf8().c_str(), getStatsName(psStats), json.fileName().toUtf8().c_str());
 	}
@@ -252,6 +298,15 @@ static void loadCompStats(WzConfig &json, COMPONENT_STATS *psStats, size_t index
 	psStats->buildPoints = json.value("buildPoints", 0).toUInt();
 	psStats->designable = json.value("designable", false).toBool();
 	psStats->weight = json.value("weight", 0).toUInt();
+	WzString useType = json.value("usageClass", "").toWzString();
+	if (useType.toStdString().find("SuperCyborg") != std::string::npos)
+	{
+		psStats->usageClass = UsageClass::SuperCyborg;
+	}
+	else if (useType.toStdString().find("Cyborg") != std::string::npos)
+	{
+		psStats->usageClass = UsageClass::Cyborg;
+	}
 	psStats->getBase().hitpoints = json.value("hitpoints", 0).toUInt();
 	psStats->getBase().hitpointPct = json.value("hitpointPct", 100).toUInt();
 
@@ -342,6 +397,7 @@ bool loadWeaponStats(WzConfig &ini)
 		psStats->base.reloadTime = ini.value("reloadTime").toUInt();
 		psStats->base.damage = ini.value("damage").toUInt();
 		psStats->base.minimumDamage = ini.value("minimumDamage", 0).toInt();
+		psStats->base.empRadius = ini.value("empRadius", 0).toUInt();
 		psStats->base.radius = ini.value("radius", 0).toUInt();
 		psStats->base.radiusDamage = ini.value("radiusDamage", 0).toUInt();
 		psStats->base.periodicalDamageTime = ini.value("periodicalDamageTime", 0).toUInt();
@@ -577,12 +633,12 @@ bool loadBodyStats(WzConfig &ini)
 	// separate function
 
 	// allocate space
-	for (int numStats = 0; numStats < numBodyStats; ++numStats)
+	for (int numStats = 0; numStats < asBodyStats.size(); ++numStats)
 	{
 		BODY_STATS *psBodyStat = &asBodyStats[numStats];
-		psBodyStat->ppIMDList.resize(numPropulsionStats * NUM_PROP_SIDES, nullptr);
-		psBodyStat->ppMoveIMDList.resize(numPropulsionStats * NUM_PROP_SIDES, nullptr);
-		psBodyStat->ppStillIMDList.resize(numPropulsionStats * NUM_PROP_SIDES, nullptr);
+		psBodyStat->ppIMDList.resize(asPropulsionStats.size() * NUM_PROP_SIDES, nullptr);
+		psBodyStat->ppMoveIMDList.resize(asPropulsionStats.size() * NUM_PROP_SIDES, nullptr);
+		psBodyStat->ppStillIMDList.resize(asPropulsionStats.size() * NUM_PROP_SIDES, nullptr);
 	}
 	for (size_t i = 0; i < list.size(); ++i)
 	{
@@ -598,7 +654,7 @@ bool loadBodyStats(WzConfig &ini)
 		}
 		ini.beginGroup("propulsionExtraModels");
 		//get the body stats
-		for (numStats = 0; numStats < numBodyStats; ++numStats)
+		for (numStats = 0; numStats < asBodyStats.size(); ++numStats)
 		{
 			psBodyStat = &asBodyStats[numStats];
 			if (list[i].compare(psBodyStat->id) == 0)
@@ -606,7 +662,7 @@ bool loadBodyStats(WzConfig &ini)
 				break;
 			}
 		}
-		if (numStats == numBodyStats) // not found
+		if (numStats == asBodyStats.size()) // not found
 		{
 			debug(LOG_FATAL, "Invalid body name %s", list[i].toUtf8().c_str());
 			return false;
@@ -614,7 +670,7 @@ bool loadBodyStats(WzConfig &ini)
 		std::vector<WzString> keys = ini.childKeys();
 		for (size_t j = 0; j < keys.size(); j++)
 		{
-			for (numStats = 0; numStats < numPropulsionStats; numStats++)
+			for (numStats = 0; numStats < asPropulsionStats.size(); numStats++)
 			{
 				PROPULSION_STATS *psPropulsionStat = &asPropulsionStats[numStats];
 				if (keys[j].compare(psPropulsionStat->id) == 0)
@@ -622,12 +678,14 @@ bool loadBodyStats(WzConfig &ini)
 					break;
 				}
 			}
-			if (numStats == numPropulsionStats)
+			if (numStats == asPropulsionStats.size())
 			{
 				debug(LOG_FATAL, "Invalid propulsion name %s", keys[j].toUtf8().c_str());
 				return false;
 			}
 			//allocate the left and right propulsion IMDs + movement and standing still animations
+			// NOTE: New base stats files + IMDs use a single combined model (in the "left" key) for both sides...
+			//       however, older mods / stats files may still rely on having both left + right
 			psBodyStat->ppIMDList[numStats * NUM_PROP_SIDES + LEFT_PROP] = statsGetIMD(ini, psBodyStat, keys[j], WzString::fromUtf8("left"));
 			psBodyStat->ppIMDList[numStats * NUM_PROP_SIDES + RIGHT_PROP] = statsGetIMD(ini, psBodyStat, keys[j], WzString::fromUtf8("right"));
 			psBodyStat->ppMoveIMDList[numStats] = statsGetIMD(ini, psBodyStat, keys[j], WzString::fromUtf8("moving"));
@@ -650,6 +708,7 @@ bool loadBrainStats(WzConfig &ini)
 	auto nullbrain = std::find(list.begin(), list.end(), WzString::fromUtf8("ZNULLBRAIN"));
 	ASSERT_OR_RETURN(false, nullbrain != list.end(), "ZNULLBRAIN is mandatory");
 	std::iter_swap(nullbrain, list.begin());
+	bool retVal = true;
 	for (size_t i = 0; i < list.size(); ++i)
 	{
 		BRAIN_STATS *psStats = &asBrainStats[i];
@@ -684,13 +743,20 @@ bool loadBrainStats(WzConfig &ini)
 		if (ini.contains("turret"))
 		{
 			int weapon = getCompFromName(COMP_WEAPON, ini.value("turret").toWzString());
-			ASSERT_OR_RETURN(false, weapon >= 0, "Unable to find weapon for brain %s", getStatsName(psStats));
-			psStats->psWeaponStat = asWeaponStats + weapon;
+			if (weapon >= 0)
+			{
+				psStats->psWeaponStat = &asWeaponStats[weapon];
+			}
+			else
+			{
+				ASSERT(weapon >= 0, "Unable to find weapon for brain %s", getStatsName(psStats));
+				retVal = false;
+			}
 		}
 		psStats->designable = ini.value("designable", false).toBool();
 		ini.endGroup();
 	}
-	return true;
+	return retVal;
 }
 
 
@@ -746,6 +812,7 @@ bool loadPropulsionStats(WzConfig &ini)
 	auto nullprop = std::find(list.begin(), list.end(), WzString::fromUtf8("ZNULLPROP"));
 	ASSERT_OR_RETURN(false, nullprop != list.end(), "ZNULLPROP is mandatory");
 	std::iter_swap(nullprop, list.begin());
+	bool retVal = true;
 	for (size_t i = 0; i < list.size(); ++i)
 	{
 		PROPULSION_STATS *psStats = &asPropulsionStats[i];
@@ -758,9 +825,13 @@ bool loadPropulsionStats(WzConfig &ini)
 		psStats->maxSpeed = ini.value("speed").toInt();
 		psStats->ref = STAT_PROPULSION + i;
 		psStats->turnSpeed = ini.value("turnSpeed", DEG(1) / 3).toInt();
+		ASSERT(psStats->turnSpeed != 0, "\"%s\".\"turnSpeed\" is 0", psStats->id.toUtf8().c_str());
 		psStats->spinSpeed = ini.value("spinSpeed", DEG(3) / 4).toInt();
+		ASSERT(psStats->spinSpeed != 0, "\"%s\".\"spinSpeed\" is 0", psStats->id.toUtf8().c_str());
 		psStats->spinAngle = ini.value("spinAngle", 180).toInt();
+		ASSERT(psStats->spinAngle != 0, "\"%s\".\"spinAngle\" is 0", psStats->id.toUtf8().c_str());
 		psStats->acceleration = ini.value("acceleration", 250).toInt();
+		ASSERT(psStats->acceleration != 0, "\"%s\".\"acceleration\" is 0", psStats->id.toUtf8().c_str());
 		psStats->deceleration = ini.value("deceleration", 800).toInt();
 		psStats->skidDeceleration = ini.value("skidDeceleration", 600).toInt();
 		psStats->pIMD = nullptr;
@@ -772,12 +843,12 @@ bool loadPropulsionStats(WzConfig &ini)
 		if (!getPropulsionType(ini.value("type").toWzString().toUtf8().c_str(), &psStats->propulsionType))
 		{
 			debug(LOG_FATAL, "loadPropulsionStats: Invalid Propulsion type for %s", getStatsName(psStats));
-			return false;
+			retVal = false;
 		}
 		ini.endGroup();
 	}
 
-	return true;
+	return retVal;
 }
 
 /*Load the Sensor stats from the file exported from Access*/
@@ -917,6 +988,7 @@ bool loadRepairStats(WzConfig &ini)
 	auto nullrepair = std::find(list.begin(), list.end(), WzString::fromUtf8("ZNULLREPAIR"));
 	ASSERT_OR_RETURN(false, nullrepair != list.end(), "ZNULLREPAIR is mandatory");
 	std::iter_swap(nullrepair, list.begin());
+	bool retVal = true;
 	for (size_t i = 0; i < list.size(); ++i)
 	{
 		REPAIR_STATS *psStats = &asRepairStats[i];
@@ -949,7 +1021,12 @@ bool loadRepairStats(WzConfig &ini)
 		}
 
 		//check its not 0 since we will be dividing by it at a later stage
-		ASSERT_OR_RETURN(false, psStats->time > 0, "Repair delay cannot be zero for %s", getStatsName(psStats));
+		if (!(psStats->time > 0))
+		{
+			ASSERT(psStats->time > 0, "Repair delay cannot be zero for %s", getStatsName(psStats));
+			psStats->time = 1;
+			retVal = false;
+		}
 
 		//get the IMD for the component
 		psStats->pIMD = statsGetIMD(ini, psStats, "model");
@@ -957,7 +1034,7 @@ bool loadRepairStats(WzConfig &ini)
 
 		ini.endGroup();
 	}
-	return true;
+	return retVal;
 }
 
 /*Load the Construct stats from the file exported from Access*/
@@ -1405,6 +1482,78 @@ const char *getWeaponSubClass(WEAPON_SUBCLASS wclass)
 	return "Bad weapon subclass";
 }
 
+/* returns the translated weapon sub class name - for local display purposes only */
+const char *getWeaponSubClassDisplayName(WEAPON_SUBCLASS wclass, bool shortForm)
+{
+	switch (wclass)
+	{
+	case WSC_CANNON:
+		return _("Cannons");
+	case WSC_MORTARS:
+		return _("Mortars");
+	case WSC_MISSILE:
+		return _("Missiles");
+	case WSC_ROCKET:
+		return _("Rockets");
+	case WSC_ENERGY:
+		return _("Energy");
+	case WSC_GAUSS:
+		return _("Gauss");
+	case WSC_FLAME:
+		// TRANSLATORS: "Flame" weapons class
+		return _("Flame");
+	case WSC_HOWITZERS:
+		return _("Howitzers");
+	case WSC_MGUN:
+		if (shortForm)
+		{
+			// TRANSLATORS: A short-form for "Machine Guns" (should be shorter than the translated full form - if not, just use the full translation for "Machine Guns")
+			return _("MG");
+		}
+		else
+		{
+			return _("Machine Guns");
+		}
+	case WSC_ELECTRONIC:
+		// TRANSLATORS: "Electronic" weapon class
+		return _("Electronic");
+	case WSC_AAGUN:
+		if (shortForm)
+		{
+			// TRANSLATORS: A short-form for "Anti-Air" weapons class (should be shorter than the translated full form - if not, just use the full translation for "Anti-Air")
+			return _("A-A");
+		}
+		else
+		{
+			return _("Anti-Air");
+		}
+	case WSC_SLOWMISSILE:
+		return _("Slow Missile");
+	case WSC_SLOWROCKET:
+		return _("Slow Rocket");
+	case WSC_LAS_SAT:
+		if (shortForm)
+		{
+			// TRANSLATORS: A short-form for "Laser Satellite" weapons class - some just use "Las-Sat" or "LasSat"
+			return _("Las-Sat");
+		}
+		else
+		{
+			return _("Laser Satellite");
+		}
+	case WSC_BOMB:
+		return _("Bombs");
+	case WSC_COMMAND:
+		return _("Command");
+	case WSC_EMP:
+		// TRANSLATORS: "EMP" (electromagnetic pulse) weapons class - probably should keep it as "EMP" (or the respective acronym in your language)
+		return _("EMP");
+	case WSC_NUM_WEAPON_SUBCLASSES: break;
+	}
+	ASSERT(false, "No such weapon subclass");
+	return "";
+}
+
 /*returns the movement model based on the string name passed in */
 bool getMovementModel(const WzString &movementModel, MOVEMENT_MODEL *model)
 {
@@ -1520,88 +1669,88 @@ bool getWeaponClass(const WzString& weaponClassStr, WEAPON_CLASS *weaponClass)
 	ASSERT_OR_RETURN(retVal, player >= 0 && player < MAX_PLAYERS, "Invalid player: %" PRIu32 "", player);
 
 /*Access functions for the upgradeable stats of a weapon*/
-int weaponFirePause(const WEAPON_STATS *psStats, int player)
+int weaponFirePause(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].firePause;
+	return psStats.upgrade[player].firePause;
 }
 
 /* Reload time is reduced for weapons with salvo fire */
-int weaponReloadTime(const WEAPON_STATS *psStats, int player)
+int weaponReloadTime(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].reloadTime;
+	return psStats.upgrade[player].reloadTime;
 }
 
-int weaponLongHit(const WEAPON_STATS *psStats, int player)
+int weaponLongHit(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].hitChance;
+	return psStats.upgrade[player].hitChance;
 }
 
-int weaponShortHit(const WEAPON_STATS *psStats, int player)
+int weaponShortHit(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].shortHitChance;
+	return psStats.upgrade[player].shortHitChance;
 }
 
-int weaponDamage(const WEAPON_STATS *psStats, int player)
+int weaponDamage(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].damage;
+	return psStats.upgrade[player].damage;
 }
 
-int weaponRadDamage(const WEAPON_STATS *psStats, int player)
+int weaponRadDamage(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].radiusDamage;
+	return psStats.upgrade[player].radiusDamage;
 }
 
-int weaponPeriodicalDamage(const WEAPON_STATS *psStats, int player)
+int weaponPeriodicalDamage(const WEAPON_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].periodicalDamage;
+	return psStats.upgrade[player].periodicalDamage;
 }
 
-int sensorRange(const SENSOR_STATS *psStats, int player)
+int sensorRange(const SENSOR_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].range;
+	return psStats.upgrade[player].range;
 }
 
-int ecmRange(const ECM_STATS *psStats, int player)
+int ecmRange(const ECM_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].range;
+	return psStats.upgrade[player].range;
 }
 
-int repairPoints(const REPAIR_STATS *psStats, int player)
+int repairPoints(const REPAIR_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].repairPoints;
+	return psStats.upgrade[player].repairPoints;
 }
 
-int constructorPoints(const CONSTRUCT_STATS *psStats, int player)
+int constructorPoints(const CONSTRUCT_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].constructPoints;
+	return psStats.upgrade[player].constructPoints;
 }
 
-int bodyPower(const BODY_STATS *psStats, int player)
+int bodyPower(const BODY_STATS& psStats, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
-	return psStats->upgrade[player].power;
+	return psStats.upgrade[player].power;
 }
 
-int bodyArmour(const BODY_STATS *psStats, int player, WEAPON_CLASS weaponClass)
+int bodyArmour(const BODY_STATS& psStats, int player, WEAPON_CLASS weaponClass)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
 	switch (weaponClass)
 	{
 	case WC_KINETIC:
-		return psStats->upgrade[player].armour;
+		return psStats.upgrade[player].armour;
 	case WC_HEAT:
-		return psStats->upgrade[player].thermal;
+		return psStats.upgrade[player].thermal;
 	case WC_NUM_WEAPON_CLASSES:
 		break;
 	}
@@ -1610,17 +1759,17 @@ int bodyArmour(const BODY_STATS *psStats, int player, WEAPON_CLASS weaponClass)
 }
 
 //calculates the weapons ROF based on the fire pause and the salvos
-int weaponROF(const WEAPON_STATS *psStat, int player)
+int weaponROF(const WEAPON_STATS& psStat, int player)
 {
 	ASSERT_PLAYER_OR_RETURN(0, player);
 	int rof = 0;
 	// if there are salvos
 	if (player >= 0
-	    && psStat->upgrade[player].numRounds
-	    && psStat->upgrade[player].reloadTime != 0)
+	    && psStat.upgrade[player].numRounds
+	    && psStat.upgrade[player].reloadTime != 0)
 	{
 		// Rounds per salvo multiplied with the number of salvos per minute
-		rof = psStat->upgrade[player].numRounds * 60 * GAME_TICKS_PER_SEC / weaponReloadTime(psStat, player);
+		rof = psStat.upgrade[player].numRounds * 60 * GAME_TICKS_PER_SEC / weaponReloadTime(psStat, player);
 	}
 
 	if (rof == 0)
@@ -1670,8 +1819,8 @@ SENSOR_STATS *objActiveRadar(const BASE_OBJECT *psObj)
 			return nullptr;
 		}
 		compIndex = ((const DROID *)psObj)->asBits[COMP_SENSOR];
-		ASSERT_OR_RETURN(nullptr, compIndex < numSensorStats, "Invalid range referenced for numSensorStats, %d > %d", compIndex, numSensorStats);
-		psStats = asSensorStats + compIndex;
+		ASSERT_OR_RETURN(nullptr, compIndex < asSensorStats.size(), "Invalid range referenced for numSensorStats, %d > %zu", compIndex, asSensorStats.size());
+		psStats = &asSensorStats[compIndex];
 		break;
 	case OBJ_STRUCTURE:
 		psStats = ((const STRUCTURE *)psObj)->pStructureType->pSensor;
@@ -1697,9 +1846,74 @@ bool objRadarDetector(const BASE_OBJECT *psObj)
 	else if (psObj->type == OBJ_DROID)
 	{
 		const DROID *psDroid = (const DROID *)psObj;
-		SENSOR_STATS *psSensor = getSensorStats(psDroid);
+		SENSOR_STATS *psSensor = psDroid->getSensorStats();
 
 		return (psSensor && psSensor->type == RADAR_DETECTOR_SENSOR);
 	}
 	return false;
+}
+
+gfx_api::texture* loadImageForWeapSubclass(WEAPON_SUBCLASS subClass)
+{
+	const char* imagePath = nullptr;
+	switch (subClass)
+	{
+		case WSC_MGUN:
+			imagePath = "images/intfac/wsc_mgun.png";
+			break;
+		case WSC_CANNON:
+			imagePath = "images/intfac/wsc_cannon.png";
+			break;
+		case WSC_MORTARS:
+			imagePath = "images/intfac/wsc_mortars.png";
+			break;
+		case WSC_MISSILE:
+			imagePath = "images/intfac/wsc_missile.png";
+			break;
+		case WSC_ROCKET:
+			imagePath = "images/intfac/wsc_rocket.png";
+			break;
+		case WSC_ENERGY:
+			imagePath = "images/intfac/wsc_energy.png";
+			break;
+		case WSC_GAUSS:
+			imagePath = "images/intfac/wsc_gauss.png";
+			break;
+		case WSC_FLAME:
+			imagePath = "images/intfac/wsc_flame.png";
+			break;
+		//case WSC_CLOSECOMBAT:
+		case WSC_HOWITZERS:
+			imagePath = "images/intfac/wsc_howitzers.png";
+			break;
+		case WSC_ELECTRONIC:
+			imagePath = "images/intfac/wsc_electronic.png";
+			break;
+		case WSC_AAGUN:
+			imagePath = "images/intfac/wsc_aagun.png";
+			break;
+		case WSC_SLOWMISSILE:
+			imagePath = "images/intfac/wsc_slowmissile.png";
+			break;
+		case WSC_SLOWROCKET:
+			imagePath = "images/intfac/wsc_slowrocket.png";
+			break;
+		case WSC_LAS_SAT:
+			imagePath = "images/intfac/wsc_las_sat.png";
+			break;
+		case WSC_BOMB:
+			imagePath = "images/intfac/wsc_bomb.png";
+			break;
+		case WSC_COMMAND:
+			imagePath = "images/intfac/wsc_command.png";
+			break;
+		case WSC_EMP:
+			imagePath = "images/intfac/wsc_emp.png";
+			break;
+		case WSC_NUM_WEAPON_SUBCLASSES:	/** The number of enumerators in this enum.	 */
+			break;
+	}
+	ASSERT_OR_RETURN(nullptr, imagePath != nullptr, "No image path");
+	WZ_Notification_Image img(imagePath);
+	return img.loadImageToTexture();
 }

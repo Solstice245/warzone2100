@@ -4,7 +4,7 @@ function eventGameInit()
 	setupGame();
 
 	//From script/rules/printsettings.js
-	printGameSettings();
+	queue("printGameSettings", TICK_TIME);
 
 	//From script/rules/oildrum.js
 	oilDrumInit();
@@ -15,7 +15,7 @@ function eventGameInit()
 	//From script/setup/setupscavenger.js
 	setupScavenger();
 
-	for (var playnum = 0; playnum < maxPlayers; playnum++)
+	for (let playnum = 0; playnum < maxPlayers; ++playnum)
 	{
 		//From script/setup/powermodifier.js
 		setupPowerModifier(playnum);
@@ -49,7 +49,7 @@ function eventGameInit()
 
 	//Structures might have been removed so we need to update the reticule button states again
 	//From script/rules/reticule.js
-	setMainReticule();
+	queue("setMainReticule", TICK_TIME);
 
 	if (tilesetType === "URBAN" || tilesetType === "ROCKIES")
 	{

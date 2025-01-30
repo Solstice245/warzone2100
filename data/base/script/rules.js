@@ -6,24 +6,26 @@ receiveAllEvents(true); //Needed to allow enemy research to apply to them
 include("script/weather.js");
 
 var mainReticule = false;
+var lastHitTime = 0;
+const TICK_TIME = 100;
 const CREATE_LIKE_EVENT = 0;
 const DESTROY_LIKE_EVENT = 1;
 const TRANSFER_LIKE_EVENT = 2;
 
 function reticuleManufactureCheck()
 {
-	var structureComplete = false;
-	var facs = [FACTORY, CYBORG_FACTORY, VTOL_FACTORY,];
+	let structureComplete = false;
+	const facs = [FACTORY, CYBORG_FACTORY, VTOL_FACTORY,];
 
-	for (var i = 0, len = facs.length; i < len; ++i)
+	for (let i = 0, len = facs.length; i < len; ++i)
 	{
-		var facType = facs[i];
-		var offWorldFacs = enumStructOffWorld(selectedPlayer, facType);
-		var onMapFacs = enumStruct(selectedPlayer, facType);
+		const facType = facs[i];
+		const offWorldFacs = enumStructOffWorld(selectedPlayer, facType);
+		const onMapFacs = enumStruct(selectedPlayer, facType);
 
 		if (offWorldFacs !== null)
 		{
-			for (var j = 0, len2 = offWorldFacs.length; j < len2; ++j)
+			for (let j = 0, len2 = offWorldFacs.length; j < len2; ++j)
 			{
 				if (offWorldFacs[j].status === BUILT)
 				{
@@ -34,7 +36,7 @@ function reticuleManufactureCheck()
 		}
 		if (!structureComplete)
 		{
-			for (var j = 0, len2 = onMapFacs.length; j < len2; ++j)
+			for (let j = 0, len2 = onMapFacs.length; j < len2; ++j)
 			{
 				if (onMapFacs[j].status === BUILT)
 				{
@@ -62,18 +64,18 @@ function reticuleManufactureCheck()
 
 function reticuleResearchCheck()
 {
-	var structureComplete = false;
-	var labs = [RESEARCH_LAB,];
+	let structureComplete = false;
+	const labs = [RESEARCH_LAB,];
 
-	for (var i = 0, len = labs.length; i < len; ++i)
+	for (let i = 0, len = labs.length; i < len; ++i)
 	{
-		var resType = labs[i];
-		var offWorldLabs = enumStructOffWorld(selectedPlayer, resType);
-		var onMapLabs = enumStruct(selectedPlayer, resType);
+		const resType = labs[i];
+		const offWorldLabs = enumStructOffWorld(selectedPlayer, resType);
+		const onMapLabs = enumStruct(selectedPlayer, resType);
 
 		if (offWorldLabs !== null)
 		{
-			for (var j = 0, len2 = offWorldLabs.length; j < len2; ++j)
+			for (let j = 0, len2 = offWorldLabs.length; j < len2; ++j)
 			{
 				if (offWorldLabs[j].status === BUILT)
 				{
@@ -84,7 +86,7 @@ function reticuleResearchCheck()
 		}
 		if (!structureComplete)
 		{
-			for (var j = 0, len2 = onMapLabs.length; j < len2; ++j)
+			for (let j = 0, len2 = onMapLabs.length; j < len2; ++j)
 			{
 				if (onMapLabs[j].status === BUILT)
 				{
@@ -124,18 +126,18 @@ function reticuleBuildCheck()
 
 function reticuleDesignCheck()
 {
-	var structureComplete = false;
-	var hqs = [HQ,];
+	let structureComplete = false;
+	const hqs = [HQ,];
 
-	for (var i = 0, len = hqs.length; i < len; ++i)
+	for (let i = 0, len = hqs.length; i < len; ++i)
 	{
-		var hqType = hqs[i];
-		var offWorldHq = enumStructOffWorld(selectedPlayer, hqType);
-		var onMapHq = enumStruct(selectedPlayer, hqType);
+		const hqType = hqs[i];
+		const offWorldHq = enumStructOffWorld(selectedPlayer, hqType);
+		const onMapHq = enumStruct(selectedPlayer, hqType);
 
 		if (offWorldHq !== null)
 		{
-			for (var j = 0, len2 = offWorldHq.length; j < len2; ++j)
+			for (let j = 0, len2 = offWorldHq.length; j < len2; ++j)
 			{
 				if (offWorldHq[j].status === BUILT)
 				{
@@ -146,7 +148,7 @@ function reticuleDesignCheck()
 		}
 		if (!structureComplete)
 		{
-			for (var j = 0, len2 = onMapHq.length; j < len2; ++j)
+			for (let j = 0, len2 = onMapHq.length; j < len2; ++j)
 			{
 				if (onMapHq[j].status === BUILT)
 				{
@@ -199,7 +201,7 @@ function setMainReticule()
 
 function reticuleUpdate(obj, eventType)
 {
-	var update_reticule = false;
+	let update_reticule = false;
 
 	if (eventType === TRANSFER_LIKE_EVENT)
 	{
@@ -225,7 +227,6 @@ function reticuleUpdate(obj, eventType)
 	if (mainReticule && update_reticule)
 	{
 		//Wait a tick for the counts to update
-		const TICK_TIME = 100;
 		queue("setMainReticule", TICK_TIME);
 	}
 }
@@ -243,14 +244,10 @@ function setupGame()
 	{
 		setCampaignNumber(2);
 		replaceTexture("page-7-barbarians-arizona.png", "page-7-barbarians-urban.png");
-		replaceTexture("page-8-player-buildings-bases.png", "page-8-player-buildings-bases-urban.png");
-		replaceTexture("page-9-player-buildings-bases.png", "page-9-player-buildings-bases-urban.png");
 	}
 	else if (tilesetType === "ROCKIES")
 	{
 		setCampaignNumber(3);
-		replaceTexture("page-8-player-buildings-bases.png", "page-8-player-buildings-bases-rockies.png");
-		replaceTexture("page-9-player-buildings-bases.png", "page-9-player-buildings-bases-rockies.png");
 		replaceTexture("page-7-barbarians-arizona.png", "page-7-barbarians-kevlar.png");
 	}
 
@@ -283,11 +280,11 @@ function eventGameInit()
 
 function setLimits()
 {
-	setDroidLimit(selectedPlayer, 101, DROID_ANY); //note: the transporter is a unit you own
+	setDroidLimit(selectedPlayer, ((tweakOptions.playerUnitCap40) ? 40 : 100) + 1, DROID_ANY); //note: the transporter is a unit you own
 	setDroidLimit(selectedPlayer, 10, DROID_COMMAND);
 	setDroidLimit(selectedPlayer, 15, DROID_CONSTRUCT);
 
-	for (var i = 0; i < maxPlayers; ++i)
+	for (let i = 0; i < maxPlayers; ++i)
 	{
 		setStructureLimits("A0PowerGenerator", 5, i);
 		setStructureLimits("A0ResourceExtractor", 200, i);
@@ -306,11 +303,11 @@ function setLimits()
 
 function resetPower()
 {
-	var powerLimit = 999999;
-	var powerProductionRate = 100;
+	let powerLimit = 999999;
+	let powerProductionRate = 100;
 
 	// set income modifier/power storage for player 0 (human)
-	if (difficulty === EASY)
+	if (difficulty <= EASY)
 	{
 		powerProductionRate = 115;
 	}
@@ -321,11 +318,11 @@ function resetPower()
 
 		if (tilesetType === "URBAN")
 		{
-			powerLimit = powerLimit + 5000;
+			powerLimit += 5000;
 		}
 		else if (tilesetType === "ROCKIES")
 		{
-			powerLimit = powerLimit + 10000;
+			powerLimit += 10000;
 		}
 	}
 	else if (difficulty === INSANE)
@@ -335,11 +332,11 @@ function resetPower()
 
 		if (tilesetType === "URBAN")
 		{
-			powerLimit = powerLimit + 2000;
+			powerLimit += 2000;
 		}
 		else if (tilesetType === "ROCKIES")
 		{
-			powerLimit = powerLimit + 4000;
+			powerLimit += 4000;
 		}
 	}
 
@@ -358,6 +355,12 @@ function eventStartLevel()
 	{
 		weatherCycle();
 		setTimer("weatherCycle", 45000);
+	}
+	if (getMissionType() === LDS_EXPAND_LIMBO)
+	{
+		//eventGameInit is too early to notice units placed from eventStartLevel.
+		//Fire off a reticule button update again after all of the eventStartLevel events happen.
+		queue("setMainReticule", TICK_TIME);
 	}
 }
 
@@ -409,8 +412,26 @@ function eventObjectTransfer(obj, from)
 	}
 }
 
-//Could be the last remaining trucks are on it.
+//Could be the last remaining trucks/commanders are on it.
 function eventTransporterLanded(transport)
+{
+	if (transport.player === selectedPlayer)
+	{
+		reticuleUpdate(transport, TRANSFER_LIKE_EVENT);
+	}
+}
+
+//Maybe no more truck/commanders on the map.
+function eventTransporterEmbarked(transport)
+{
+	if (transport.player === selectedPlayer)
+	{
+		reticuleUpdate(transport, TRANSFER_LIKE_EVENT);
+	}
+}
+
+//Maybe no more truck/commanders on the map.
+function eventTransporterDisembarked(transport)
 {
 	if (transport.player === selectedPlayer)
 	{
@@ -423,10 +444,9 @@ function eventResearched(research, structure, player)
 	// NOTE: Research upgrades are handled by the C++ core game engine since 4.1.0
 }
 
-var lastHitTime = 0;
 function eventAttacked(victim, attacker)
 {
-	if ((victim.player === selectedPlayer) && gameTime > lastHitTime + 5000)
+	if ((victim.player === selectedPlayer) && (attacker.player !== selectedPlayer) && (gameTime > (lastHitTime + 5000)))
 	{
 		lastHitTime = gameTime;
 		if (victim.type === STRUCTURE)

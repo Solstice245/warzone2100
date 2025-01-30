@@ -34,15 +34,9 @@
 #define __STDC_LIMIT_MACROS
 #endif
 
-#if defined(HAVE_CONFIG_H)
-#  undef _XOPEN_SOURCE
-#  include "config.h"
-#elif !defined(HAVE_CONFIG_H)
-#  define PACKAGE "warzone2100"
-#  define PACKAGE_BUGREPORT "http://wz2100.net/"
-#  define PACKAGE_NAME "Warzone 2100"
-#  define PACKAGE_TARNAME "warzone2100"
-#endif
+// Always include generated config.h
+#undef _XOPEN_SOURCE
+#include "wz2100-generated-config.h"
 
 
 /* ---- Platform detection ---- */
@@ -161,6 +155,7 @@
 #elif defined(__INTEGRITY)
 #  define WZ_OS_INTEGRITY
 #elif defined(__MAKEDEPEND__)
+#elif defined(__EMSCRIPTEN__)
 #else
 #  error "Warzone has not been tested on this OS. Please contact warzone2100-project@lists.sourceforge.net"
 #endif /* WZ_OS_x */
@@ -520,19 +515,6 @@
 #endif
 
 
-/*! \def WZ_DECL_THREAD
- * Declares a variable to be local to the running thread, and not shared between threads.
- */
-#if defined(__MACOSX__)
-#  define WZ_DECL_THREAD // nothing, MacOSX does not yet support this
-#elif defined(WZ_CC_GNU) || defined(WZ_CC_INTEL)
-#  define WZ_DECL_THREAD __thread
-#elif defined(WZ_CC_MSVC)
-#  define WZ_DECL_THREAD __declspec(thread)
-#else
-#  error "Thread local storage attribute required"
-#endif
-
 /* ---- Platform specific setup ---- */
 
 #if defined(WZ_OS_WIN)
@@ -566,13 +548,9 @@
 #  undef NOMINMAX
 #  define NOMINMAX 1		// disable the min / max macros
 #  include <windows.h>
+#  include <algorithm>
 
 #  if defined(WZ_CC_MSVC)
-//   notify people we are disabling these warning messages.
-#    pragma message (" *** Warnings 4018,4127,4389 have been squelched. ***")
-#    pragma warning (disable : 4018) // Shut up: '>' : signed/unsigned mismatch
-#    pragma warning (disable : 4127) // Shut up: conditional expression is constant (eg. "while(0)")
-#    pragma warning (disable : 4389) // Shut up: '==' : signed/unsigned mismatch
 
 #    define strcasecmp _stricmp
 #    define strncasecmp _strnicmp
@@ -618,7 +596,7 @@
 #endif
 
 
-#if !defined(WZ_C99) && !defined(va_copy)
+#if !defined(WZ_C99) && !defined(va_copy) && (!defined(_MSC_VER) || (_MSC_VER < 1900))
 /**
  * Implements the interface of the C99 macro va_copy such that we can use it on
  * non-C99 systems as well.

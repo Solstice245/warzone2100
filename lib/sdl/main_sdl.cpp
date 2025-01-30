@@ -32,6 +32,7 @@
 #include "lib/ivis_opengl/screen.h"
 #include "lib/exceptionhandler/dumpinfo.h"
 #include "lib/gamelib/gtime.h"
+#include "src/configuration.h"
 #include "src/warzoneconfig.h"
 #include "src/game.h"
 #include "gfx_api_sdl.h"
@@ -69,7 +70,11 @@
 #include "cocoa_wz_menus.h"
 #endif
 
-#include <optional-lite/optional.hpp>
+#if defined(__EMSCRIPTEN__)
+#include <emscripten.h>
+#endif
+
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -77,8 +82,8 @@ void mainLoop();
 // used in crash reports & version info
 const char *BACKEND = "SDL";
 
-std::map<KEY_CODE, SDL_Keycode> KEY_CODE_to_SDLKey;
-std::map<SDL_Keycode, KEY_CODE > SDLKey_to_KEY_CODE;
+std::map<KEY_CODE, SDL_Scancode> KEY_CODE_to_SDLScancode;
+std::map<SDL_Scancode, KEY_CODE > SDLScancode_to_KEY_CODE;
 
 int realmain(int argc, char *argv[]);
 
@@ -92,13 +97,14 @@ int main(int argc, char *argv[])
 static SDL_Window *WZwindow = nullptr;
 static optional<video_backend> WZbackend = video_backend::opengl;
 
-#if defined(WZ_OS_MAC)
+#if defined(WZ_OS_MAC) || defined(WZ_OS_WIN) || defined(__EMSCRIPTEN__)
 // on macOS, SDL_WINDOW_FULLSCREEN_DESKTOP *must* be used (or high-DPI fullscreen toggling breaks)
+// on Emscripten (browser), SDL_WINDOW_FULLSCREEN_DESKTOP should be used (to avoid various toggling breaks)
 const WINDOW_MODE WZ_SDL_DEFAULT_FULLSCREEN_MODE = WINDOW_MODE::desktop_fullscreen;
 #else
 const WINDOW_MODE WZ_SDL_DEFAULT_FULLSCREEN_MODE = WINDOW_MODE::fullscreen;
 #endif
-static WINDOW_MODE lastFullscreenMode = WZ_SDL_DEFAULT_FULLSCREEN_MODE;
+static WINDOW_MODE altEnterToggleFullscreenMode = WZ_SDL_DEFAULT_FULLSCREEN_MODE;
 
 // The screen that the game window is on.
 int screenIndex = 0;
@@ -111,6 +117,14 @@ unsigned int windowHeight = 0;
 // The current display scale factor.
 unsigned int current_displayScale = 100;
 float current_displayScaleFactor = 1.f;
+
+struct QueuedWindowDimensions
+{
+	int width;
+	int height;
+	bool recenter;
+};
+optional<QueuedWindowDimensions> deferredDimensionReset = nullopt;
 
 static std::vector<screeninfo> displaylist;	// holds all our possible display lists
 
@@ -203,6 +217,19 @@ void* GetTextEventsOwner = nullptr;
 
 static optional<int> wzQuitExitCode;
 
+bool wzReduceDisplayScalingIfNeeded(int currWidth, int currHeight);
+
+#if defined(__EMSCRIPTEN__)
+
+#include <emscripten.h>
+#include <emscripten/html5.h>
+
+void wzemscripten_startup_ensure_canvas_displayed();
+bool wz_emscripten_enable_soft_fullscreen();
+EM_BOOL wz_emscripten_fullscreenchange_callback(int eventType, const EmscriptenFullscreenChangeEvent *fullscreenChangeEvent, void *userData);
+
+#endif
+
 /**************************/
 /***     Misc support   ***/
 /**************************/
@@ -250,10 +277,16 @@ bool get_scrap(char **dst)
 	}
 }
 
-void StartTextInput(void* pTextInputRequester)
+void StartTextInput(void* pTextInputRequester, const WzTextInputRect& textInputRect)
 {
 	if (!GetTextEventsOwner)
 	{
+		SDL_Rect rect;
+		rect.x = textInputRect.x;
+		rect.y = textInputRect.y;
+		rect.w = textInputRect.width;
+		rect.h = textInputRect.height;
+		SDL_SetTextInputRect(&rect);
 		SDL_StartTextInput();	// enable text events
 		debug(LOG_INPUT, "SDL text events started");
 	}
@@ -262,6 +295,14 @@ void StartTextInput(void* pTextInputRequester)
 		debug(LOG_INPUT, "StartTextInput called by new input requester before old requester called StopTextInput");
 	}
 	GetTextEventsOwner = pTextInputRequester;
+
+	// on some platforms, it seems like we also need to call SDL_SetTextInputRect every frame to properly set the text input rect (?)
+	SDL_Rect rect;
+	rect.x = textInputRect.x;
+	rect.y = textInputRect.y;
+	rect.w = textInputRect.width;
+	rect.h = textInputRect.height;
+	SDL_SetTextInputRect(&rect);
 }
 
 void StopTextInput(void* pTextInputResigner)
@@ -289,6 +330,16 @@ bool isInTextInputMode()
 	return result;
 }
 
+bool wzHasTouchInputDevices()
+{
+	return SDL_GetNumTouchDevices() > 0;
+}
+
+bool wzSeemsLikeNonTouchPlatform()
+{
+	return !wzHasTouchInputDevices() || (SDL_HasScreenKeyboardSupport() == SDL_FALSE);
+}
+
 /* Put a character into a text buffer overwriting any text under the cursor */
 WzString wzGetSelection()
 {
@@ -305,6 +356,34 @@ WzString wzGetSelection()
 std::vector<screeninfo> wzAvailableResolutions()
 {
 	return displaylist;
+}
+
+screeninfo wzGetCurrentFullscreenDisplayMode()
+{
+	screeninfo result = {};
+	if (WZwindow == nullptr)
+	{
+		debug(LOG_WARNING, "wzGetCurrentFullscreenDisplayMode called when window is not available");
+		return {};
+	}
+	SDL_DisplayMode current = { 0, 0, 0, 0, 0 };
+	int currScreen = SDL_GetWindowDisplayIndex(WZwindow);
+	if (currScreen < 0)
+	{
+		debug(LOG_WZ, "Failed to get current screen index: %s", SDL_GetError());
+		currScreen = 0;
+	}
+	if (SDL_GetWindowDisplayMode(WZwindow, &current) != 0)
+	{
+		// Failed to get current fullscreen display mode for window?
+		debug(LOG_WZ, "Failed to get current WindowDisplayMode: %s", SDL_GetError());
+		return {};
+	}
+	result.screen = currScreen;
+	result.width = current.w;
+	result.height = current.h;
+	result.refresh_rate = current.refresh_rate;
+	return result;
 }
 
 std::vector<unsigned int> wzAvailableDisplayScales()
@@ -331,7 +410,9 @@ static std::vector<video_backend>& sortGfxBackendsForCurrentSystem(std::vector<v
 std::vector<video_backend> wzAvailableGfxBackends()
 {
 	std::vector<video_backend> availableBackends;
+#if !defined(__EMSCRIPTEN__)
 	availableBackends.push_back(video_backend::opengl);
+#endif
 #if !defined(WZ_OS_MAC) // OpenGL ES is not supported on macOS, and WZ doesn't currently ship with an OpenGL ES library on macOS
 	availableBackends.push_back(video_backend::opengles);
 #endif
@@ -349,7 +430,10 @@ video_backend wzGetDefaultGfxBackendForCurrentSystem()
 {
 	// SDL backend supports: OpenGL, OpenGLES, Vulkan (if compiled with support), DirectX (on Windows, via LibANGLE)
 
-#if defined(_WIN32) && defined(WZ_BACKEND_DIRECTX) && (defined(_M_ARM64) || defined(_M_ARM))
+#if defined(__EMSCRIPTEN__)
+	// For Emscripten, OpenGLES (WebGL) should be the default
+	return video_backend::opengles;
+#elif defined(_WIN32) && defined(WZ_BACKEND_DIRECTX) && (defined(_M_ARM64) || defined(_M_ARM))
 	// On ARM-based Windows, DirectX should be the default (for compatibility)
 	return video_backend::directx;
 #else
@@ -390,6 +474,26 @@ static video_backend wzGetNextFallbackGfxBackendForCurrentSystem(const video_bac
 		case video_backend::opengl:
 			// offer Vulkan (which uses Vulkan -> Metal) as a fallback option if OpenGL failed
 			next_backend = video_backend::vulkan;
+			break;
+		case video_backend::vulkan:
+			// offer OpenGL
+			next_backend = video_backend::opengl;
+			break;
+		default:
+			// offer usual default
+			next_backend = wzGetDefaultGfxBackendForCurrentSystem();
+			break;
+	}
+#elif defined(WZ_OS_UNIX)
+	switch (current_failed_backend)
+	{
+		case video_backend::opengl:
+			// offer Vulkan
+			next_backend = video_backend::vulkan;
+			break;
+		case video_backend::vulkan:
+			// offer OpenGL
+			next_backend = video_backend::opengl;
 			break;
 		default:
 			// offer usual default
@@ -500,6 +604,79 @@ void wzDisplayDialog(DialogType type, const char *title, const char *message)
 	SDL_ShowSimpleMessageBox(sdl_messagebox_flags, title, message, WZwindow);
 }
 
+// Displays a message box with specified button(s)
+// Returns 0 on failure, or the (clicked button index + 1)
+size_t wzDisplayDialogAdvanced(DialogType type, const char *title, const char *message, std::vector<std::string> buttonsText)
+{
+	if (!WZbackend.has_value())
+	{
+		// while this could be thread_local, thread_local may not yet be supported on all platforms properly
+		// and wzDisplayDialog should probably be called **only** on the main thread anyway
+		static bool processingDialog = false;
+		if (!processingDialog)
+		{
+			// in headless mode, do not display a messagebox (which might block the main thread)
+			// but just log the details
+			processingDialog = true;
+			debug(LOG_INFO, "Suppressed dialog (headless):\n\tTitle: %s\n\tMessage: %s", title, message);
+			processingDialog = false;
+		}
+		return 0;
+	}
+
+	if (buttonsText.empty())
+	{
+		// always at least show an "OK" button
+		buttonsText.push_back("OK");
+	}
+
+	std::vector<SDL_MessageBoxButtonData> buttons;
+	buttons.reserve(buttonsText.size());
+	for (size_t i = 0; i < buttonsText.size(); ++i)
+	{
+		Uint32 buttonFlags = 0;
+		if (i == 0)
+		{
+			buttonFlags |= SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT;
+		}
+		if (i == buttonsText.size() - 1)
+		{
+			buttonFlags |= SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT;
+		}
+		buttons.push_back(SDL_MessageBoxButtonData{buttonFlags, static_cast<int>(i + 1), buttonsText[i].c_str()});
+	}
+
+	Uint32 sdl_messagebox_flags = 0;
+	switch (type)
+	{
+		case Dialog_Error:
+			sdl_messagebox_flags = SDL_MESSAGEBOX_ERROR;
+			break;
+		case Dialog_Warning:
+			sdl_messagebox_flags = SDL_MESSAGEBOX_WARNING;
+			break;
+		case Dialog_Information:
+			sdl_messagebox_flags = SDL_MESSAGEBOX_INFORMATION;
+			break;
+	}
+
+	const SDL_MessageBoxData messageboxdata = {
+		sdl_messagebox_flags, /* .flags */
+		WZwindow, /* .window */
+		title, /* .title */
+		message, /* .message */
+		static_cast<int>(buttons.size()), /* .numbuttons */
+		buttons.data(), /* .buttons */
+		nullptr /* .colorScheme */
+	};
+	int buttonid = 0;
+	if (SDL_ShowMessageBox(&messageboxdata, &buttonid) < 0) {
+		// error displaying message box
+		return 0;
+	}
+	return buttonid;
+}
+
 WINDOW_MODE wzGetCurrentWindowMode()
 {
 	if (!WZbackend.has_value())
@@ -530,13 +707,21 @@ WINDOW_MODE wzGetCurrentWindowMode()
 
 std::vector<WINDOW_MODE> wzSupportedWindowModes()
 {
-#if defined(WZ_OS_MAC)
+#if defined(WZ_OS_MAC) || defined(__EMSCRIPTEN__)
 	// on macOS, SDL_WINDOW_FULLSCREEN_DESKTOP *must* be used (or high-DPI fullscreen toggling breaks)
 	// thus "classic" fullscreen is not supported
 	return {WINDOW_MODE::desktop_fullscreen, WINDOW_MODE::windowed};
 #else
 	return {WINDOW_MODE::desktop_fullscreen, WINDOW_MODE::windowed, WINDOW_MODE::fullscreen};
 #endif
+}
+
+bool wzIsSupportedWindowMode(WINDOW_MODE mode)
+{
+	auto supportedModes = wzSupportedWindowModes();
+	return std::any_of(supportedModes.begin(), supportedModes.end(), [mode](WINDOW_MODE i) -> bool {
+		return i == mode;
+	});
 }
 
 WINDOW_MODE wzGetNextWindowMode(WINDOW_MODE currentMode)
@@ -563,49 +748,178 @@ WINDOW_MODE wzAltEnterToggleFullscreen()
 		case WINDOW_MODE::desktop_fullscreen:
 			// fall-through
 		case WINDOW_MODE::fullscreen:
-			lastFullscreenMode = mode;
+			altEnterToggleFullscreenMode = mode;
 			if (wzChangeWindowMode(WINDOW_MODE::windowed))
 			{
 				mode = WINDOW_MODE::windowed;
 			}
 			break;
 		case WINDOW_MODE::windowed:
-			// use lastFullscreenMode
-			if (wzChangeWindowMode(lastFullscreenMode))
+			// use altEnterToggleFullscreenMode
+			if (wzChangeWindowMode(altEnterToggleFullscreenMode))
 			{
-				mode = lastFullscreenMode;
+				mode = altEnterToggleFullscreenMode;
 			}
 			break;
 	}
 	return mode;
 }
 
-bool wzChangeWindowMode(WINDOW_MODE mode)
+bool wzSetToggleFullscreenMode(WINDOW_MODE fullscreenMode)
 {
-	if (wzGetCurrentWindowMode() == mode)
+	switch (fullscreenMode)
+	{
+		case WINDOW_MODE::fullscreen:
+		case WINDOW_MODE::desktop_fullscreen:
+		{
+			if (!wzIsSupportedWindowMode(fullscreenMode))
+			{
+				// not a supported mode on this system!
+				return false;
+			}
+			altEnterToggleFullscreenMode = fullscreenMode;
+			return true;
+		}
+		default:
+			return false;
+	}
+}
+
+WINDOW_MODE wzGetToggleFullscreenMode()
+{
+	return altEnterToggleFullscreenMode;
+}
+
+void wzPostChangedSwapInterval()
+{
+#ifdef WZ_OS_MAC
+	if (WZbackend == video_backend::vulkan)
+	{
+		// If using Vulkan backend (and, thus, MoltenVK),
+		// Workaround MoltenVK issue (doesn't seem to fully accept the recreated swapchain until window resize event?)
+		// - Trigger a window resize event (regardless of current window mode)
+		auto currentMode = wzGetCurrentWindowMode();
+		switch (currentMode)
+		{
+			case WINDOW_MODE::desktop_fullscreen:
+			case WINDOW_MODE::fullscreen:
+				if (wzChangeWindowMode(WINDOW_MODE::windowed))
+				{
+					wzChangeWindowMode(currentMode);
+				}
+				break;
+			case WINDOW_MODE::windowed:
+				int currWidth = 0, currHeight = 0;
+				SDL_GetWindowSize(WZwindow, &currWidth, &currHeight);
+
+				// set one bigger than current size
+				SDL_SetWindowSize(WZwindow, currWidth+1, currHeight+1);
+
+				// restore the old windowed size
+				SDL_SetWindowSize(WZwindow, currWidth, currHeight);
+				break;
+		}
+	}
+#endif
+}
+
+bool wzChangeWindowMode(WINDOW_MODE mode, bool silent)
+{
+	auto previousMode = wzGetCurrentWindowMode();
+	if (previousMode == mode)
 	{
 		// already in this mode
 		return true;
+	}
+
+	if (!wzIsSupportedWindowMode(mode))
+	{
+		// not a supported mode on this system
+		return false;
+	}
+
+	if (!silent)
+	{
+		debug(LOG_INFO, "Changing window mode: %s -> %s", to_display_string(previousMode).c_str(), to_display_string(mode).c_str());
 	}
 
 	int sdl_result = -1;
 	switch (mode)
 	{
 		case WINDOW_MODE::desktop_fullscreen:
-			sdl_result = SDL_SetWindowFullscreen(WZwindow, SDL_WINDOW_FULLSCREEN_DESKTOP);
-			if (sdl_result != 0) { return false; }
+#if defined(__EMSCRIPTEN__)
+			emscripten_exit_soft_fullscreen();
+#endif
+			sdl_result = SDL_SetWindowFullscreen(WZwindow, SDL_WINDOW_FULLSCREEN_DESKTOP); // TODO: Currently crashes in Emscripten builds?
+			if (sdl_result != 0)
+			{
+#if defined(__EMSCRIPTEN__)
+				if (previousMode == WINDOW_MODE::windowed)
+				{
+					wz_emscripten_enable_soft_fullscreen();
+				}
+#endif
+				return false;
+			}
 			wzSetWindowIsResizable(false);
 			break;
 		case WINDOW_MODE::windowed:
+		{
+			int currDisplayIndex = SDL_GetWindowDisplayIndex(WZwindow);
+			if (currDisplayIndex < 0)
+			{
+				currDisplayIndex = screenIndex;
+			}
+			// disable fullscreen mode
 			sdl_result = SDL_SetWindowFullscreen(WZwindow, 0);
 			if (sdl_result != 0) { return false; }
 			wzSetWindowIsResizable(true);
+			// Determine the maximum usable windowed size for this display/screen, and cap the desired window size at that
+			int desiredWidth = war_GetWidth(), desiredHeight = war_GetHeight();
+			SDL_Rect displayUsableBounds = { 0, 0, 0, 0 };
+#if defined(WZ_OS_MAC)
+			// SDL currently triggers an internal assert when calling SDL_GetDisplayUsableBounds here on macOS - so use SDL_GetDisplayBounds for now
+			if (SDL_GetDisplayBounds(currDisplayIndex, &displayUsableBounds) == 0)
+#else
+			if (SDL_GetDisplayUsableBounds(currDisplayIndex, &displayUsableBounds) == 0)
+#endif
+			{
+				if (displayUsableBounds.w > 0 && displayUsableBounds.h > 0)
+				{
+					desiredWidth = std::min(displayUsableBounds.w, desiredWidth);
+					desiredHeight = std::min(displayUsableBounds.h, desiredHeight);
+				}
+			}
+			// restore the old windowed size
+			SDL_SetWindowSize(WZwindow, desiredWidth, desiredHeight);
+			// Position the window (centered) on the screen (for its new size)
+			SDL_SetWindowPosition(WZwindow, SDL_WINDOWPOS_CENTERED_DISPLAY(currDisplayIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(currDisplayIndex));
+			// Workaround for issues properly restoring window dimensions when changing from fullscreen -> windowed (on some platforms)
+			deferredDimensionReset = QueuedWindowDimensions {desiredWidth, desiredHeight, true};
 			break;
+		}
 		case WINDOW_MODE::fullscreen:
+		{
+#if defined(__EMSCRIPTEN__)
+			emscripten_exit_soft_fullscreen();
+#endif
 			sdl_result = SDL_SetWindowFullscreen(WZwindow, SDL_WINDOW_FULLSCREEN);
-			if (sdl_result != 0) { return false; }
+			if (sdl_result != 0)
+			{
+#if defined(__EMSCRIPTEN__)
+				if (previousMode == WINDOW_MODE::windowed)
+				{
+					wz_emscripten_enable_soft_fullscreen();
+				}
+#endif
+				return false;
+			}
 			wzSetWindowIsResizable(false);
+			int currWidth = 0, currHeight = 0;
+			SDL_GetWindowSize(WZwindow, &currWidth, &currHeight);
+			wzReduceDisplayScalingIfNeeded(currWidth, currHeight);
 			break;
+		}
 	}
 
 	return sdl_result == 0;
@@ -695,9 +1009,12 @@ void wzDelay(unsigned int delay)
 /**************************/
 /***    Thread support  ***/
 /**************************/
-WZ_THREAD *wzThreadCreate(int (*threadFunc)(void *), void *data)
+WZ_THREAD *wzThreadCreate(int (*threadFunc)(void *), void *data, const char* name)
 {
-	return (WZ_THREAD *)SDL_CreateThread(threadFunc, "wzThread", data);
+	const char* defaultName = "wzThread";
+	if (name == nullptr)
+		name = defaultName;
+	return (WZ_THREAD *)SDL_CreateThread(threadFunc, name, data);
 }
 
 unsigned long wzThreadID(WZ_THREAD *thread)
@@ -786,14 +1103,14 @@ void wzAsyncExecOnMainThread(WZ_MAINTHREADEXEC *exec)
 		// The app-defined event has not yet been registered with SDL
 		return;
 	}
-	SDL_Event event;
-	SDL_memset(&event, 0, sizeof(event));
-	event.type = _wzSDLAppEvent;
-	event.user.code = wzSDLAppEventCodes::MAINTHREADEXEC;
-	event.user.data1 = exec;
-	assert(event.user.data1 != nullptr);
-	event.user.data2 = 0;
-	SDL_PushEvent(&event);
+	SDL_Event execEvent;
+	SDL_memset(&execEvent, 0, sizeof(execEvent));
+	execEvent.type = _wzSDLAppEvent;
+	execEvent.user.code = wzSDLAppEventCodes::MAINTHREADEXEC;
+	execEvent.user.data1 = exec;
+	assert(execEvent.user.data1 != nullptr);
+	execEvent.user.data2 = 0;
+	SDL_PushEvent(&execEvent);
 	// receiver handles deleting `exec` on the main thread after doExecOnMainThread() has been called
 }
 
@@ -802,140 +1119,140 @@ void wzAsyncExecOnMainThread(WZ_MAINTHREADEXEC *exec)
 **/
 static inline void initKeycodes()
 {
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_ESC, SDLK_ESCAPE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_1, SDLK_1));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_2, SDLK_2));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_3, SDLK_3));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_4, SDLK_4));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_5, SDLK_5));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_6, SDLK_6));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_7, SDLK_7));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_8, SDLK_8));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_9, SDLK_9));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_0, SDLK_0));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_MINUS, SDLK_MINUS));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_EQUALS, SDLK_EQUALS));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_BACKSPACE, SDLK_BACKSPACE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_TAB, SDLK_TAB));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_Q, SDLK_q));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_W, SDLK_w));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_E, SDLK_e));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_R, SDLK_r));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_T, SDLK_t));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_Y, SDLK_y));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_U, SDLK_u));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_I, SDLK_i));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_O, SDLK_o));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_P, SDLK_p));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LBRACE, SDLK_LEFTBRACKET));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RBRACE, SDLK_RIGHTBRACKET));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RETURN, SDLK_RETURN));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LCTRL, SDLK_LCTRL));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_A, SDLK_a));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_S, SDLK_s));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_D, SDLK_d));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F, SDLK_f));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_G, SDLK_g));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_H, SDLK_h));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_J, SDLK_j));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_K, SDLK_k));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_L, SDLK_l));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_SEMICOLON, SDLK_SEMICOLON));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_QUOTE, SDLK_QUOTE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_BACKQUOTE, SDLK_BACKQUOTE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LSHIFT, SDLK_LSHIFT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LMETA, SDLK_LGUI));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LSUPER, SDLK_LGUI));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_BACKSLASH, SDLK_BACKSLASH));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_Z, SDLK_z));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_X, SDLK_x));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_C, SDLK_c));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_V, SDLK_v));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_B, SDLK_b));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_N, SDLK_n));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_M, SDLK_m));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_COMMA, SDLK_COMMA));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_FULLSTOP, SDLK_PERIOD));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_FORWARDSLASH, SDLK_SLASH));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RSHIFT, SDLK_RSHIFT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RMETA, SDLK_RGUI));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RSUPER, SDLK_RGUI));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_STAR, SDLK_KP_MULTIPLY));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LALT, SDLK_LALT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_SPACE, SDLK_SPACE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_CAPSLOCK, SDLK_CAPSLOCK));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F1, SDLK_F1));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F2, SDLK_F2));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F3, SDLK_F3));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F4, SDLK_F4));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F5, SDLK_F5));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F6, SDLK_F6));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F7, SDLK_F7));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F8, SDLK_F8));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F9, SDLK_F9));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F10, SDLK_F10));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_NUMLOCK, SDLK_NUMLOCKCLEAR));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_SCROLLLOCK, SDLK_SCROLLLOCK));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_7, SDLK_KP_7));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_8, SDLK_KP_8));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_9, SDLK_KP_9));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_MINUS, SDLK_KP_MINUS));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_4, SDLK_KP_4));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_5, SDLK_KP_5));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_6, SDLK_KP_6));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_PLUS, SDLK_KP_PLUS));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_1, SDLK_KP_1));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_2, SDLK_KP_2));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_3, SDLK_KP_3));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_0, SDLK_KP_0));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_FULLSTOP, SDLK_KP_PERIOD));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F11, SDLK_F11));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_F12, SDLK_F12));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RCTRL, SDLK_RCTRL));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KP_BACKSLASH, SDLK_KP_DIVIDE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RALT, SDLK_RALT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_HOME, SDLK_HOME));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_UPARROW, SDLK_UP));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_PAGEUP, SDLK_PAGEUP));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_LEFTARROW, SDLK_LEFT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_RIGHTARROW, SDLK_RIGHT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_END, SDLK_END));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_DOWNARROW, SDLK_DOWN));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_PAGEDOWN, SDLK_PAGEDOWN));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_INSERT, SDLK_INSERT));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_DELETE, SDLK_DELETE));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_KPENTER, SDLK_KP_ENTER));
-	KEY_CODE_to_SDLKey.insert(std::pair<KEY_CODE, SDL_Keycode>(KEY_IGNORE, SDL_Keycode(5190)));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_ESC, SDL_SCANCODE_ESCAPE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_1, SDL_SCANCODE_1));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_2, SDL_SCANCODE_2));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_3, SDL_SCANCODE_3));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_4, SDL_SCANCODE_4));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_5, SDL_SCANCODE_5));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_6, SDL_SCANCODE_6));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_7, SDL_SCANCODE_7));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_8, SDL_SCANCODE_8));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_9, SDL_SCANCODE_9));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_0, SDL_SCANCODE_0));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_MINUS, SDL_SCANCODE_MINUS));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_EQUALS, SDL_SCANCODE_EQUALS));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_BACKSPACE, SDL_SCANCODE_BACKSPACE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_TAB, SDL_SCANCODE_TAB));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_Q, SDL_SCANCODE_Q));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_W, SDL_SCANCODE_W));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_E, SDL_SCANCODE_E));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_R, SDL_SCANCODE_R));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_T, SDL_SCANCODE_T));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_Y, SDL_SCANCODE_Y));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_U, SDL_SCANCODE_U));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_I, SDL_SCANCODE_I));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_O, SDL_SCANCODE_O));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_P, SDL_SCANCODE_P));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LBRACE, SDL_SCANCODE_LEFTBRACKET));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RBRACE, SDL_SCANCODE_RIGHTBRACKET));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RETURN, SDL_SCANCODE_RETURN));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LCTRL, SDL_SCANCODE_LCTRL));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_A, SDL_SCANCODE_A));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_S, SDL_SCANCODE_S));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_D, SDL_SCANCODE_D));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F, SDL_SCANCODE_F));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_G, SDL_SCANCODE_G));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_H, SDL_SCANCODE_H));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_J, SDL_SCANCODE_J));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_K, SDL_SCANCODE_K));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_L, SDL_SCANCODE_L));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_SEMICOLON, SDL_SCANCODE_SEMICOLON));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_QUOTE, SDL_SCANCODE_APOSTROPHE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_BACKQUOTE, SDL_SCANCODE_GRAVE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LSHIFT, SDL_SCANCODE_LSHIFT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LMETA, SDL_SCANCODE_LGUI));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LSUPER, SDL_SCANCODE_LGUI));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_BACKSLASH, SDL_SCANCODE_BACKSLASH));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_Z, SDL_SCANCODE_Z));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_X, SDL_SCANCODE_X));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_C, SDL_SCANCODE_C));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_V, SDL_SCANCODE_V));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_B, SDL_SCANCODE_B));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_N, SDL_SCANCODE_N));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_M, SDL_SCANCODE_M));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_COMMA, SDL_SCANCODE_COMMA));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_FULLSTOP, SDL_SCANCODE_PERIOD));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_FORWARDSLASH, SDL_SCANCODE_SLASH));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RSHIFT, SDL_SCANCODE_RSHIFT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RMETA, SDL_SCANCODE_RGUI));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RSUPER, SDL_SCANCODE_RGUI));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_STAR, SDL_SCANCODE_KP_MULTIPLY));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LALT, SDL_SCANCODE_LALT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_SPACE, SDL_SCANCODE_SPACE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_CAPSLOCK, SDL_SCANCODE_CAPSLOCK));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F1, SDL_SCANCODE_F1));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F2, SDL_SCANCODE_F2));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F3, SDL_SCANCODE_F3));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F4, SDL_SCANCODE_F4));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F5, SDL_SCANCODE_F5));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F6, SDL_SCANCODE_F6));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F7, SDL_SCANCODE_F7));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F8, SDL_SCANCODE_F8));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F9, SDL_SCANCODE_F9));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F10, SDL_SCANCODE_F10));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_NUMLOCK, SDL_SCANCODE_NUMLOCKCLEAR));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_SCROLLLOCK, SDL_SCANCODE_SCROLLLOCK));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_7, SDL_SCANCODE_KP_7));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_8, SDL_SCANCODE_KP_8));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_9, SDL_SCANCODE_KP_9));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_MINUS, SDL_SCANCODE_KP_MINUS));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_4, SDL_SCANCODE_KP_4));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_5, SDL_SCANCODE_KP_5));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_6, SDL_SCANCODE_KP_6));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_PLUS, SDL_SCANCODE_KP_PLUS));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_1, SDL_SCANCODE_KP_1));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_2, SDL_SCANCODE_KP_2));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_3, SDL_SCANCODE_KP_3));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_0, SDL_SCANCODE_KP_0));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_FULLSTOP, SDL_SCANCODE_KP_PERIOD));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F11, SDL_SCANCODE_F11));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_F12, SDL_SCANCODE_F12));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RCTRL, SDL_SCANCODE_RCTRL));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KP_BACKSLASH, SDL_SCANCODE_KP_DIVIDE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RALT, SDL_SCANCODE_RALT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_HOME, SDL_SCANCODE_HOME));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_UPARROW, SDL_SCANCODE_UP));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_PAGEUP, SDL_SCANCODE_PAGEUP));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_LEFTARROW, SDL_SCANCODE_LEFT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_RIGHTARROW, SDL_SCANCODE_RIGHT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_END, SDL_SCANCODE_END));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_DOWNARROW, SDL_SCANCODE_DOWN));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_PAGEDOWN, SDL_SCANCODE_PAGEDOWN));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_INSERT, SDL_SCANCODE_INSERT));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_DELETE, SDL_SCANCODE_DELETE));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_KPENTER, SDL_SCANCODE_KP_ENTER));
+	KEY_CODE_to_SDLScancode.insert(std::pair<KEY_CODE, SDL_Scancode>(KEY_IGNORE, SDL_Scancode(5190)));
 
-	std::map<KEY_CODE, SDL_Keycode>::iterator it;
-	for (it = KEY_CODE_to_SDLKey.begin(); it != KEY_CODE_to_SDLKey.end(); it++)
+	std::map<KEY_CODE, SDL_Scancode>::iterator it;
+	for (it = KEY_CODE_to_SDLScancode.begin(); it != KEY_CODE_to_SDLScancode.end(); it++)
 	{
-		SDLKey_to_KEY_CODE.insert(std::pair<SDL_Keycode, KEY_CODE>(it->second, it->first));
+		SDLScancode_to_KEY_CODE.insert(std::pair<SDL_Scancode, KEY_CODE>(it->second, it->first));
 	}
 }
 
-static inline KEY_CODE sdlKeyToKeyCode(SDL_Keycode key)
+static inline KEY_CODE sdlScancodeToKeyCode(SDL_Scancode key)
 {
-	std::map<SDL_Keycode, KEY_CODE >::iterator it;
+	std::map<SDL_Scancode, KEY_CODE >::iterator it;
 
-	it = SDLKey_to_KEY_CODE.find(key);
-	if (it != SDLKey_to_KEY_CODE.end())
+	it = SDLScancode_to_KEY_CODE.find(key);
+	if (it != SDLScancode_to_KEY_CODE.end())
 	{
 		return it->second;
 	}
-	return (KEY_CODE)key;
+	return KEY_MAXSCAN;
 }
 
-static inline SDL_Keycode keyCodeToSDLKey(KEY_CODE code)
+static inline SDL_Scancode keyCodeToSDLScancode(KEY_CODE code)
 {
-	std::map<KEY_CODE, SDL_Keycode>::iterator it;
+	std::map<KEY_CODE, SDL_Scancode>::iterator it;
 
-	it = KEY_CODE_to_SDLKey.find(code);
-	if (it != KEY_CODE_to_SDLKey.end())
+	it = KEY_CODE_to_SDLScancode.find(code);
+	if (it != KEY_CODE_to_SDLScancode.end())
 	{
 		return it->second;
 	}
-	return (SDL_Keycode)code;
+	return (SDL_Scancode)code;
 }
 
 // Cyclic increment.
@@ -947,6 +1264,12 @@ static InputKey *inputPointerNext(InputKey *p)
 /* add count copies of the characater code to the input buffer */
 static void inputAddBuffer(UDWORD key, utf_32_char unicode)
 {
+	if (!GetTextEventsOwner)
+	{
+		// Text input events aren't enabled
+		return;
+	}
+
 	/* Calculate what pEndBuffer will be set to next */
 	InputKey	*pNext = inputPointerNext(pEndBuffer);
 
@@ -961,6 +1284,7 @@ static void inputAddBuffer(UDWORD key, utf_32_char unicode)
 	pEndBuffer = pNext;
 }
 
+// Returns the human-readable name for the key *in the current keyboard layout*
 void keyScanToString(KEY_CODE code, char *ascii, UDWORD maxStringSize)
 {
 	if (code == KEY_LCTRL)
@@ -994,7 +1318,7 @@ void keyScanToString(KEY_CODE code, char *ascii, UDWORD maxStringSize)
 
 	if (code < KEY_MAXSCAN)
 	{
-		snprintf(ascii, maxStringSize, "%s", SDL_GetKeyName(keyCodeToSDLKey(code)));
+		snprintf(ascii, maxStringSize, "%s", SDL_GetKeyName(SDL_GetKeyFromScancode(keyCodeToSDLScancode(code))));
 		if (ascii[0] >= 'a' && ascii[0] <= 'z' && ascii[1] != 0)
 		{
 			// capitalize
@@ -1113,13 +1437,13 @@ void inputNewFrame(void)
 		if (aKeyState[i].state == KEY_PRESSED)
 		{
 			aKeyState[i].state = KEY_DOWN;
-			debug(LOG_NEVER, "This key is DOWN! %x, %d [%s]", i, i, SDL_GetKeyName(keyCodeToSDLKey((KEY_CODE)i)));
+			debug(LOG_NEVER, "This key is DOWN! %x, %d [%s]", i, i, SDL_GetScancodeName(keyCodeToSDLScancode((KEY_CODE)i)));
 		}
 		else if (aKeyState[i].state == KEY_RELEASED  ||
 		         aKeyState[i].state == KEY_PRESSRELEASE)
 		{
 			aKeyState[i].state = KEY_UP;
-			debug(LOG_NEVER, "This key is UP! %x, %d [%s]", i, i, SDL_GetKeyName(keyCodeToSDLKey((KEY_CODE)i)));
+			debug(LOG_NEVER, "This key is UP! %x, %d [%s]", i, i, SDL_GetScancodeName(keyCodeToSDLScancode((KEY_CODE)i)));
 		}
 	}
 
@@ -1300,38 +1624,38 @@ static void inputHandleKeyEvent(SDL_KeyboardEvent *keyEvent)
 		case SDLK_PAGEDOWN:
 			vk = INPBUF_PGDN;
 			break;
-		case KEY_BACKSPACE:
+		case SDLK_BACKSPACE:
 			vk = INPBUF_BKSPACE;
 			break;
-		case KEY_TAB:
+		case SDLK_TAB:
 			vk = INPBUF_TAB;
 			break;
-		case KEY_RETURN:
+		case SDLK_RETURN:
 			vk = INPBUF_CR;
 			break;
-		case KEY_ESC:
+		case SDLK_ESCAPE:
 			vk = INPBUF_ESC;
 			break;
 		default:
 			break;
 		}
-		// Keycodes without character representations are determined by their scancode bitwise OR-ed with 1<<30 (0x40000000).
-		unsigned currentKey = keyEvent->keysym.sym;
+
 		if (vk)
 		{
-			// Take care of 'editing' keys that were pressed
+			// Take care of adding 'editing' keys that were pressed to the input buffer (for text editing control handling)
 			inputAddBuffer(vk, 0);
-			debug(LOG_INPUT, "Editing key: 0x%x, %d SDLkey=[%s] pressed", vk, vk, SDL_GetKeyName(currentKey));
+			debug(LOG_INPUT, "Editing key: 0x%x, %d SDLkey=[%s] pressed", vk, vk, SDL_GetKeyName(keyEvent->keysym.sym));
 		}
 		else
 		{
 			// add everything else
-			inputAddBuffer(currentKey, 0);
+			inputAddBuffer(keyEvent->keysym.sym, 0);
 		}
 
-		debug(LOG_INPUT, "Key Code (pressed): 0x%x, %d, [%c] SDLkey=[%s]", currentKey, currentKey, currentKey < 128 && currentKey > 31 ? (char)currentKey : '?', SDL_GetKeyName(currentKey));
+		SDL_Scancode currentKey = keyEvent->keysym.scancode;
+		debug(LOG_INPUT, "Key Code (pressed): 0x%x, %d, SDLscancode=[%s]", currentKey, currentKey, SDL_GetScancodeName(currentKey));
 
-		KEY_CODE code = sdlKeyToKeyCode(currentKey);
+		KEY_CODE code = sdlScancodeToKeyCode(currentKey);
 		if (code >= KEY_MAXSCAN)
 		{
 			break;
@@ -1349,9 +1673,9 @@ static void inputHandleKeyEvent(SDL_KeyboardEvent *keyEvent)
 
 	case SDL_KEYUP:
 	{
-		unsigned currentKey = keyEvent->keysym.sym;
-		debug(LOG_INPUT, "Key Code (*Depressed*): 0x%x, %d, [%c] SDLkey=[%s]", currentKey, currentKey, currentKey < 128 && currentKey > 31 ? (char)currentKey : '?', SDL_GetKeyName(currentKey));
-		KEY_CODE code = sdlKeyToKeyCode(keyEvent->keysym.sym);
+		unsigned currentKey = keyEvent->keysym.scancode;
+		debug(LOG_INPUT, "Key Code (*Depressed*): 0x%x, %d, SDLscancode=[%s]", currentKey, currentKey, SDL_GetKeyName(currentKey));
+		KEY_CODE code = sdlScancodeToKeyCode(keyEvent->keysym.scancode);
 		if (code >= KEY_MAXSCAN)
 		{
 			break;
@@ -1771,7 +2095,26 @@ static bool wzGetDisplayDPI(int displayIndex, float* dpi, float* baseDpi)
 unsigned int wzGetDefaultBaseDisplayScale(int displayIndex)
 {
 #if defined(WZ_OS_WIN)
-	// SDL does not yet have built-in "high-DPI display" support on Windows (as of SDL 2.0.14)
+	// SDL 2.24.0+ has DPI scaling support on Windows
+	SDL_version linked_sdl_version;
+	SDL_GetVersion(&linked_sdl_version);
+	if (linked_sdl_version.major > 2 || (linked_sdl_version.major == 2 && linked_sdl_version.minor >= 24))
+	{
+		// Check if the hints have been set to enable it
+		if (SDL_GetHintBoolean(SDL_HINT_WINDOWS_DPI_SCALING, SDL_FALSE) == SDL_TRUE)
+		{
+			// SDL DPI awareness + scaling is enabled
+			// Just return 100%
+			return 100;
+		}
+		else
+		{
+			debug(LOG_INFO, "Can't rely on SDL high-DPI support (not available, or explicitly disabled)");
+			// fall-through
+		}
+	}
+
+	// SDL Windows DPI awareness support is unavailable
 	// Thus, all adjustments must be made using the Display Scale feature in WZ itself
 	// Calculate a good base game Display Scale based on the actual screen display scale
 	if (!win_IsProcessDPIAware())
@@ -1865,6 +2208,168 @@ bool wzChangeDisplayScale(unsigned int displayScale)
 
 
 	processScreenSizeChangeNotificationIfNeeded();
+
+	return true;
+}
+
+bool wzChangeCursorScale(unsigned int cursorScale)
+{
+	if (WZwindow == nullptr)
+	{
+		debug(LOG_WARNING, "wzChangeCursorScale called when window is not available");
+		return false;
+	}
+
+	if (cursorScale == war_getCursorScale())
+	{
+		return true;
+	}
+
+	war_setCursorScale(cursorScale); // must be set before cursors are reinit
+	wzSDLReinitCursors();
+	return true;
+}
+
+bool wzReduceDisplayScalingIfNeeded(int currWidth, int currHeight)
+{
+	// Check whether the desired window size is smaller than the minimum required for the current Display Scale
+	if (wzWindowSizeIsSmallerThanMinimumRequired(currWidth, currHeight))
+	{
+		// The new window size is smaller than the minimum required size for the current display scale level.
+
+		unsigned int maxDisplayScale = wzGetMaximumDisplayScaleForWindowSize(currWidth, currHeight);
+		if (maxDisplayScale < 100)
+		{
+			// Cannot adjust display scale factor below 1. Desired window size is below the minimum supported.
+			debug(LOG_WZ, "Size (%d x %d) is smaller than the minimum supported at a 100%% display scale", currWidth, currHeight);
+			return false;
+		}
+
+		// Adjust the current display scale level to the nearest supported level.
+		debug(LOG_WZ, "The current Display Scale (%d%%) is too high for the desired window size. Reducing the current Display Scale to the maximum possible for the desired window size: %d%%.", current_displayScale, maxDisplayScale);
+		wzChangeDisplayScale(maxDisplayScale);
+
+		// Store the new display scale
+		war_SetDisplayScale(maxDisplayScale);
+	}
+
+	return true;
+}
+
+bool wzChangeFullscreenDisplayMode(int screen, unsigned int width, unsigned int height) // TODO: Take refresh rate as well...
+{
+	if (WZwindow == nullptr)
+	{
+		debug(LOG_WARNING, "wzChangeFullscreenDisplayMode called when window is not available");
+		return false;
+	}
+	debug(LOG_INFO, "Changing fullscreen mode to [%d] %dx%d", screen, width, height);
+
+	bool hasPrior = true;
+	int priorScreen = SDL_GetWindowDisplayIndex(WZwindow);
+	if (priorScreen < 0)
+	{
+		debug(LOG_WZ, "Failed to get current screen index: %s", SDL_GetError());
+		priorScreen = screenIndex;
+	}
+	SDL_DisplayMode prior = { 0, 0, 0, 0, 0 };
+	if (SDL_GetWindowDisplayMode(WZwindow, &prior) != 0)
+	{
+		// Failed to get current fullscreen display mode for window?
+		debug(LOG_WZ, "Failed to get current WindowDisplayMode: %s", SDL_GetError());
+		// Proceed with defaults...
+		hasPrior = false;
+	}
+
+	if (screen != priorScreen)
+	{
+		debug(LOG_ERROR, "Currently, switching to a fullscreen display mode on a different screen is unsupported. Move the window to the desired display first and try again.");
+		return false;
+	}
+
+	SDL_DisplayMode	closest;
+	closest.format = closest.w = closest.h = closest.refresh_rate = 0;
+	closest.driverdata = 0;
+
+	// Find closest available display mode
+	SDL_DisplayMode desired;
+	desired.format = 0;
+	desired.w = width;
+	desired.h = height;
+	desired.refresh_rate = 0;
+	desired.driverdata = 0;
+
+
+	if (width == 0 || height == 0)
+	{
+		debug(LOG_INFO, "Getting desktop display mode");
+		if (SDL_GetDesktopDisplayMode(screen, &closest) != 0)
+		{
+			debug(LOG_INFO, "Unable to get desktop DisplayMode?: %s", SDL_GetError());
+			return false;
+		}
+	}
+	else
+	{
+		if (SDL_GetClosestDisplayMode(screen, &desired, &closest) == NULL)
+		{
+			// no match was found
+			debug(LOG_INFO, "No closest DisplayMode found ([%d] [%u x %u]); error: %s", screen, width, height, SDL_GetError());
+			return false;
+		}
+	}
+
+	int result = SDL_SetWindowDisplayMode(WZwindow, &closest);
+	if (result != 0)
+	{
+		// SDL_SetWindowDisplayMode failed
+		debug(LOG_INFO, "SDL_SetWindowDisplayMode ([%d] [%u x %u]) failed: %s", screen, width, height, SDL_GetError());
+		return false;
+	}
+
+	if (wzGetCurrentWindowMode() == WINDOW_MODE::fullscreen)
+	{
+		// If we are already in fullscreen mode, *also* trigger a SetWindowSize
+		// to ensure everything (including drawable size) gets properly updated
+		int currWidth = 0, currHeight = 0;
+		SDL_GetWindowSize(WZwindow, &currWidth, &currHeight);
+
+		// Check that logical window size isn't < minimum required
+		if ((currWidth < MIN_WZ_GAMESCREEN_WIDTH) || (currHeight < MIN_WZ_GAMESCREEN_HEIGHT))
+		{
+			// Revert to prior display mode
+			result = SDL_SetWindowDisplayMode(WZwindow, (hasPrior) ? &prior : nullptr);
+			if (result != 0)
+			{
+				// SDL_SetWindowDisplayMode failed - unable to revert??
+				debug(LOG_ERROR, "Failed to revert to prior WindowDisplayMode: %s", SDL_GetError());
+			}
+			return false;
+		}
+
+		SDL_SetWindowSize(WZwindow, currWidth, currHeight);
+
+		// Reduce display scaling if needed
+		if (!wzReduceDisplayScalingIfNeeded(currWidth, currHeight))
+		{
+			// Desired window size is below the minimum supported
+			// Revert to prior display mode
+			result = SDL_SetWindowDisplayMode(WZwindow, (hasPrior) ? &prior : nullptr);
+			if (result != 0)
+			{
+				// SDL_SetWindowDisplayMode failed - unable to revert??
+				debug(LOG_ERROR, "Failed to revert to prior WindowDisplayMode: %s", SDL_GetError());
+			}
+			return false;
+		}
+
+		// Store the updated screenIndex
+		screenIndex = screen;
+	}
+
+	war_SetFullscreenModeScreen(screen);
+	war_SetFullscreenModeWidth(closest.w);
+	war_SetFullscreenModeHeight(closest.h);
 
 	return true;
 }
@@ -1983,6 +2488,41 @@ bool wzChangeWindowResolution(int screen, unsigned int width, unsigned int heigh
 	return true;
 }
 
+MinimizeOnFocusLossBehavior wzGetCurrentMinimizeOnFocusLossBehavior()
+{
+	const char* hint = SDL_GetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS);
+	if (!hint || !*hint || SDL_strcasecmp(hint, "auto") == 0)
+	{
+		return MinimizeOnFocusLossBehavior::Auto;
+	}
+	bool bValue = SDL_GetHintBoolean(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, SDL_FALSE);
+	return (bValue) ? MinimizeOnFocusLossBehavior::On_Fullscreen : MinimizeOnFocusLossBehavior::Off;
+}
+
+void wzSetMinimizeOnFocusLoss(MinimizeOnFocusLossBehavior behavior)
+{
+#if !defined(__EMSCRIPTEN__)
+	const char* value = "auto";
+	switch (behavior)
+	{
+		case MinimizeOnFocusLossBehavior::Off:
+			value = "0";
+			break;
+		case MinimizeOnFocusLossBehavior::On_Fullscreen:
+			value = "1";
+			break;
+		case MinimizeOnFocusLossBehavior::Auto:
+			value = "auto";
+			break;
+		default:
+			return;
+	}
+	SDL_SetHintWithPriority(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS, value, SDL_HINT_OVERRIDE);
+#else
+	// no-op on Emscripten
+#endif
+}
+
 // Returns the current window screen, width, and height
 void wzGetWindowResolution(int *screen, unsigned int *width, unsigned int *height)
 {
@@ -2031,7 +2571,7 @@ static SDL_WindowFlags SDL_backend(const video_backend& backend)
 	return SDL_WindowFlags{};
 }
 
-bool shouldResetGfxBackendPrompt(video_backend currentBackend, video_backend newBackend, std::string failedToInitializeObject = "graphics", std::string additionalErrorDetails = "")
+bool shouldResetGfxBackendPrompt_internal(video_backend currentBackend, video_backend newBackend, std::string failureVerb = "initialize", std::string failedToInitializeObject = "graphics", std::string additionalErrorDetails = "")
 {
 	// Offer to reset to the specified gfx backend
 	std::string resetString = std::string("Reset to ") + to_display_string(newBackend) + "";
@@ -2039,8 +2579,8 @@ bool shouldResetGfxBackendPrompt(video_backend currentBackend, video_backend new
 	   { SDL_MESSAGEBOX_BUTTON_RETURNKEY_DEFAULT, 1, resetString.c_str() },
 	   { SDL_MESSAGEBOX_BUTTON_ESCAPEKEY_DEFAULT, 2, "Not Now" },
 	};
-	std::string titleString = std::string("Warzone: Failed to initialize ") + failedToInitializeObject;
-	std::string messageString = std::string("Failed to initialize ") + failedToInitializeObject + " for backend: " + to_display_string(currentBackend) + ".\n\n";
+	std::string titleString = std::string("Warzone: Failed to ") + failureVerb + " " + failedToInitializeObject;
+	std::string messageString = std::string("Failed to ") + failureVerb + " " + failedToInitializeObject + " for backend: " + to_display_string(currentBackend) + ".\n\n";
 	if (!additionalErrorDetails.empty())
 	{
 		messageString += "Error Details: \n\"" + additionalErrorDetails + "\"\n\n";
@@ -2068,6 +2608,11 @@ bool shouldResetGfxBackendPrompt(video_backend currentBackend, video_backend new
 	return false;
 }
 
+bool shouldResetGfxBackendPrompt(video_backend currentBackend, video_backend newBackend, std::string failedToInitializeObject = "graphics", std::string additionalErrorDetails = "")
+{
+	return shouldResetGfxBackendPrompt_internal(currentBackend, newBackend, "initialize", failedToInitializeObject, additionalErrorDetails);
+}
+
 void resetGfxBackend(video_backend newBackend, bool displayRestartMessage = true)
 {
 	war_setGfxBackend(newBackend);
@@ -2076,6 +2621,46 @@ void resetGfxBackend(video_backend newBackend, bool displayRestartMessage = true
 		std::string title = std::string("Backend reset to: ") + to_display_string(newBackend);
 		wzDisplayDialog(Dialog_Information, title.c_str(), "(Note: Do not specify a --gfxbackend option, or it will override this new setting.)\n\nPlease restart Warzone 2100 to use the new graphics setting.");
 	}
+}
+
+void wzResetGfxSettingsOnFailure()
+{
+	// Because too high an MSAA value could lead to out-of-memory errors (for example, trying to create the scene renderpass), reset MSAA to off for next run
+	war_setAntialiasing(0);
+
+	saveGfxConfig();
+}
+
+bool wzPromptToChangeGfxBackendOnFailure(std::string additionalErrorDetails /*= ""*/)
+{
+	if (!WZbackend.has_value())
+	{
+		ASSERT(false, "Can't reset gfx backend when there is no gfx backend.");
+		return false;
+	}
+	video_backend defaultBackend = wzGetNextFallbackGfxBackendForCurrentSystem(WZbackend.value());
+	if (WZbackend.value() != defaultBackend)
+	{
+		if (shouldResetGfxBackendPrompt_internal(WZbackend.value(), defaultBackend, "draw", "graphics", additionalErrorDetails))
+		{
+			resetGfxBackend(defaultBackend);
+			saveGfxConfig(); // must force-persist the new value before returning!
+			return true;
+		}
+	}
+	else
+	{
+		// Display message that there was a failure with the gfx backend (but there's no other backend to offer changing it to?)
+		std::string title = std::string("Graphics Error: ") + to_display_string(WZbackend.value());
+		std::string messageString = std::string("An error occured with graphics backend: ") + to_display_string(WZbackend.value()) + ".\n\n";
+		if (!additionalErrorDetails.empty())
+		{
+			messageString += "Error Details: \n\"" + additionalErrorDetails + "\"\n\n";
+		}
+		messageString += "Warzone 2100 will now close.";
+		wzDisplayDialog(Dialog_Error, title.c_str(), messageString.c_str());
+	}
+	return false;
 }
 
 bool wzSDLOneTimeInit()
@@ -2130,7 +2715,7 @@ static bool wzSDLOneTimeInitSubsystem(uint32_t subsystem_flag)
 	return true;
 }
 
-void wzSDLPreWindowCreate_InitOpenGLAttributes(bool antialiasing, bool useOpenGLES, bool useOpenGLESLibrary)
+void wzSDLPreWindowCreate_InitOpenGLAttributes(int antialiasing, bool useOpenGLES, bool useOpenGLESLibrary)
 {
 	// Set OpenGL attributes before creating the SDL Window
 
@@ -2157,11 +2742,8 @@ void wzSDLPreWindowCreate_InitOpenGLAttributes(bool antialiasing, bool useOpenGL
 	// Enable stencil buffer, needed for shadows to work.
 	SDL_GL_SetAttribute(SDL_GL_STENCIL_SIZE, 8);
 
-	if (antialiasing)
-	{
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLEBUFFERS, 1);
-		SDL_GL_SetAttribute(SDL_GL_MULTISAMPLESAMPLES, antialiasing);
-	}
+	// Do *not* enable multisampling on the default framebuffer (i.e. setting SDL_GL_MULTISAMPLEBUFFERS)
+	// This is handled separately for the scene render buffer / frame buffer
 
 	if (!sdl_OpenGL_Impl::configureOpenGLContextRequest(sdl_OpenGL_Impl::getInitialContextRequest(useOpenGLES), useOpenGLESLibrary))
 	{
@@ -2202,19 +2784,21 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 	;
 	const bool usesSDLBackend_OpenGL = useOpenGLES || (backend == video_backend::opengl);
 
-	// populate with the saved configuration values (if we had any)
-	int width = war_GetWidth();
-	int height = war_GetHeight();
-	// NOTE: Prior to wzMainScreenSetup being run, the display system is populated with the window width + height
-	// (i.e. not taking into account the game display scale). This function later sets the display system
-	// to the *game screen* width and height (taking into account the display scale).
-
 	// Initialize video subsystem (if not yet initialized)
 	if (!wzSDLOneTimeInitSubsystem(SDL_INIT_VIDEO))
 	{
 		debug(LOG_FATAL, "Error: Could not initialise SDL video subsystem (%s).", SDL_GetError());
 		SDL_Quit();
 		exit(EXIT_FAILURE);
+	}
+
+	// ensure "fullscreen" is in the supported fullscreen modes for the current system
+	auto supportedFullscreenModes = wzSupportedWindowModes();
+	if (std::find(supportedFullscreenModes.begin(), supportedFullscreenModes.end(), fullscreen) == supportedFullscreenModes.end())
+	{
+		debug(LOG_ERROR, "Unsupported fullscreen mode specified: %d; using default", static_cast<int>(fullscreen));
+		fullscreen = WINDOW_MODE::windowed;
+		war_setWindowMode(fullscreen); // persist the change
 	}
 
 	if (usesSDLBackend_OpenGL)
@@ -2231,6 +2815,19 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 	struct screeninfo screenlist;
 	for (int i = 0; i < SDL_GetNumVideoDisplays(); ++i)		// How many monitors we got
 	{
+		optional<float> dpiAdjustmentFactor = nullopt;
+#if defined(WZ_OS_WIN) // currently only used on Windows
+		// get DPI for this display (DPI-aware Windows returns pixel values, so we must use this to convert to logical values for minimum checks!)
+		float dpi, baseDpi;
+		if (wzGetDisplayDPI(i, &dpi, &baseDpi))
+		{
+			if (dpi != baseDpi)
+			{
+				dpiAdjustmentFactor = ceil(dpi / baseDpi);
+			}
+		}
+#endif
+
 		int numdisplaymodes = SDL_GetNumDisplayModes(i);	// Get the number of display modes on this monitor
 		for (int j = 0; j < numdisplaymodes; j++)
 		{
@@ -2244,9 +2841,16 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 			}
 
 			debug(LOG_WZ, "Monitor [%d] %dx%d %d %s", i, displaymode.w, displaymode.h, displaymode.refresh_rate, SDL_GetPixelFormatName(displaymode.format));
-			if ((displaymode.w < MIN_WZ_GAMESCREEN_WIDTH) || (displaymode.h < MIN_WZ_GAMESCREEN_HEIGHT))
+			int logicalWidth = displaymode.w;
+			int logicalHeight = displaymode.h;
+			if (dpiAdjustmentFactor.has_value())
 			{
-				debug(LOG_WZ, "Monitor mode resolution < %d x %d -- discarding entry", MIN_WZ_GAMESCREEN_WIDTH, MIN_WZ_GAMESCREEN_HEIGHT);
+				logicalWidth = static_cast<int>(ceil(static_cast<float>(logicalWidth) / dpiAdjustmentFactor.value()));
+				logicalHeight = static_cast<int>(ceil(static_cast<float>(logicalHeight) / dpiAdjustmentFactor.value()));
+			}
+			if ((logicalWidth < MIN_WZ_GAMESCREEN_WIDTH) || (logicalHeight < MIN_WZ_GAMESCREEN_HEIGHT))
+			{
+				debug(LOG_WZ, "Monitor mode logical resolution < %d x %d -- discarding entry", MIN_WZ_GAMESCREEN_WIDTH, MIN_WZ_GAMESCREEN_HEIGHT);
 			}
 			else if (displaymode.refresh_rate < 59)
 			{
@@ -2277,15 +2881,23 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 		debug(LOG_WZ, "Monitor [%d] %dx%d %d", i, current.w, current.h, current.refresh_rate);
 	}
 
-	if (width == 0 || height == 0)
+	// populate with the saved configuration values (if we had any)
+	int desiredWindowWidth = (fullscreen == WINDOW_MODE::fullscreen) ? war_GetFullscreenModeWidth() : war_GetWidth();
+	int desiredWindowHeight = (fullscreen == WINDOW_MODE::fullscreen) ? war_GetFullscreenModeHeight() : war_GetHeight();
+
+	// NOTE: Prior to wzMainScreenSetup being run, the display system is populated with the window width + height
+	// (i.e. not taking into account the game display scale). This function later sets the display system
+	// to the *game screen* width and height (taking into account the display scale).
+
+	if (desiredWindowWidth == 0 || desiredWindowHeight == 0)
 	{
-		width = windowWidth = current.w;
-		height = windowHeight = current.h;
+		windowWidth = current.w;
+		windowHeight = current.h;
 	}
 	else
 	{
-		windowWidth = width;
-		windowHeight = height;
+		windowWidth = desiredWindowWidth;
+		windowHeight = desiredWindowHeight;
 	}
 
 	setDisplayScale(war_GetDisplayScale());
@@ -2296,7 +2908,6 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 		SDL_GetDisplayBounds(i, &bounds);
 		debug(LOG_WZ, "Monitor %d: pos %d x %d : res %d x %d", i, (int)bounds.x, (int)bounds.y, (int)bounds.w, (int)bounds.h);
 	}
-	screenIndex = war_GetScreen();
 	const int currentNumDisplays = SDL_GetNumVideoDisplays();
 	if (currentNumDisplays < 1)
 	{
@@ -2304,68 +2915,71 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 		SDL_Quit();
 		exit(EXIT_FAILURE);
 	}
-	if (screenIndex > currentNumDisplays)
+
+	// Check desired screen index values versus current system
+	if (war_GetScreen() > currentNumDisplays)
 	{
-		debug(LOG_WARNING, "Invalid screen [%d] defined in configuration; there are only %d displays; falling back to display 0", screenIndex, currentNumDisplays);
-		screenIndex = 0;
+		debug(LOG_WARNING, "Invalid screen [%d] defined in configuration; there are only %d displays; falling back to display 0", war_GetScreen(), currentNumDisplays);
 		war_SetScreen(0);
 	}
-
-	if (war_getAutoAdjustDisplayScale())
+	if (war_GetFullscreenModeScreen() > currentNumDisplays || war_GetFullscreenModeScreen() < 0)
 	{
-		// Since SDL (at least <= 2.0.14) does not provide built-in support for high-DPI displays on *some* platforms
-		// (example: Windows), do our best to bump up the game's Display Scale setting to be a better match if the screen
-		// on which the game starts has a higher effective Display Scale than the game's starting Display Scale setting.
-		unsigned int screenBaseDisplayScale = wzGetDefaultBaseDisplayScale(screenIndex);
-		if (screenBaseDisplayScale > wzGetCurrentDisplayScale())
-		{
-			// When bumping up the display scale, also increase the target window size proportionally
-			debug(LOG_WZ, "Increasing game Display Scale to better match calculated default base display scale: %u%% -> %u%%", wzGetCurrentDisplayScale(), screenBaseDisplayScale);
-			unsigned int priorDisplayScale = wzGetCurrentDisplayScale();
-			setDisplayScale(screenBaseDisplayScale);
-			float displayScaleDiff = (float)screenBaseDisplayScale / (float)priorDisplayScale;
-			windowWidth = static_cast<unsigned int>(ceil((float)windowWidth * displayScaleDiff));
-			windowHeight = static_cast<unsigned int>(ceil((float)windowHeight * displayScaleDiff));
-			war_SetDisplayScale(screenBaseDisplayScale); // save the new display scale configuration
-		}
+		debug(LOG_WARNING, "Invalid fullscreen screen [%d] defined in configuration; there are only %d displays; falling back to display 0", war_GetFullscreenModeScreen(), currentNumDisplays);
+		war_SetFullscreenModeScreen(0);
 	}
 
-	// Calculate the minimum window size given the current display scale
+	screenIndex = (fullscreen == WINDOW_MODE::fullscreen) ? war_GetFullscreenModeScreen() : war_GetScreen();
+
+	// Calculate the minimum window size (in *logical* points) given the current display scale
 	unsigned int minWindowWidth = 0, minWindowHeight = 0;
 	wzGetMinimumWindowSizeForDisplayScaleFactor(&minWindowWidth, &minWindowHeight);
 
-	if ((windowWidth < minWindowWidth) || (windowHeight < minWindowHeight))
+	if (fullscreen != WINDOW_MODE::fullscreen)
 	{
-		// The desired window width and/or height is lower than the required minimum for the current display scale.
-		// Reduce the display scale to the maximum supported (for the desired window size), and recalculate the required minimum window size.
-		unsigned int maxDisplayScale = wzGetMaximumDisplayScaleForWindowSize(windowWidth, windowHeight);
-		maxDisplayScale = std::max(100u, maxDisplayScale); // if wzGetMaximumDisplayScaleForWindowSize fails, it returns < 100
-		setDisplayScale(maxDisplayScale);
-		war_SetDisplayScale(maxDisplayScale); // save the new display scale configuration
-		wzGetMinimumWindowSizeForDisplayScaleFactor(&minWindowWidth, &minWindowHeight);
-	}
-
-	windowWidth = std::max(windowWidth, minWindowWidth);
-	windowHeight = std::max(windowHeight, minWindowHeight);
-
-	auto supportedFullscreenModes = wzSupportedWindowModes();
-	if (std::find(supportedFullscreenModes.begin(), supportedFullscreenModes.end(), fullscreen) == supportedFullscreenModes.end())
-	{
-		debug(LOG_ERROR, "Unsupported fullscreen mode specified: %d; using default", static_cast<int>(fullscreen));
-		fullscreen = WINDOW_MODE::windowed;
-		war_setWindowMode(fullscreen); // persist the change
-	}
-
-	if (fullscreen == WINDOW_MODE::windowed)
-	{
-		// Determine the maximum usable windowed size for this display/screen
-		SDL_Rect displayUsableBounds = { 0, 0, 0, 0 };
-		if (SDL_GetDisplayUsableBounds(screenIndex, &displayUsableBounds) == 0)
+		if (war_getAutoAdjustDisplayScale())
 		{
-			if (displayUsableBounds.w > 0 && displayUsableBounds.h > 0)
+			// Since SDL (at least <= 2.0.14) does not provide built-in support for high-DPI displays on *some* platforms
+			// (example: Windows), do our best to bump up the game's Display Scale setting to be a better match if the screen
+			// on which the game starts has a higher effective Display Scale than the game's starting Display Scale setting.
+			unsigned int screenBaseDisplayScale = wzGetDefaultBaseDisplayScale(screenIndex);
+			if (screenBaseDisplayScale > wzGetCurrentDisplayScale())
 			{
-				windowWidth = std::min((unsigned int)displayUsableBounds.w, windowWidth);
-				windowHeight = std::min((unsigned int)displayUsableBounds.h, windowHeight);
+				// When bumping up the display scale, also increase the target window size proportionally
+				debug(LOG_WZ, "Increasing game Display Scale to better match calculated default base display scale: %u%% -> %u%%", wzGetCurrentDisplayScale(), screenBaseDisplayScale);
+				unsigned int priorDisplayScale = wzGetCurrentDisplayScale();
+				setDisplayScale(screenBaseDisplayScale);
+				float displayScaleDiff = (float)screenBaseDisplayScale / (float)priorDisplayScale;
+				windowWidth = static_cast<unsigned int>(ceil((float)windowWidth * displayScaleDiff));
+				windowHeight = static_cast<unsigned int>(ceil((float)windowHeight * displayScaleDiff));
+				war_SetDisplayScale(screenBaseDisplayScale); // save the new display scale configuration
+			}
+		}
+
+		if ((windowWidth < minWindowWidth) || (windowHeight < minWindowHeight))
+		{
+			// The desired window width and/or height is lower than the required minimum for the current display scale.
+			// Reduce the display scale to the maximum supported (for the desired window size), and recalculate the required minimum window size.
+			unsigned int maxDisplayScale = wzGetMaximumDisplayScaleForWindowSize(windowWidth, windowHeight);
+			maxDisplayScale = std::max(100u, maxDisplayScale); // if wzGetMaximumDisplayScaleForWindowSize fails, it returns < 100
+			setDisplayScale(maxDisplayScale);
+			war_SetDisplayScale(maxDisplayScale); // save the new display scale configuration
+			wzGetMinimumWindowSizeForDisplayScaleFactor(&minWindowWidth, &minWindowHeight);
+		}
+
+		windowWidth = std::max(windowWidth, minWindowWidth);
+		windowHeight = std::max(windowHeight, minWindowHeight);
+
+		if (fullscreen == WINDOW_MODE::windowed)
+		{
+			// Determine the maximum usable windowed size for this display/screen
+			SDL_Rect displayUsableBounds = { 0, 0, 0, 0 };
+			if (SDL_GetDisplayUsableBounds(screenIndex, &displayUsableBounds) == 0)
+			{
+				if (displayUsableBounds.w > 0 && displayUsableBounds.h > 0)
+				{
+					windowWidth = std::min((unsigned int)displayUsableBounds.w, windowWidth);
+					windowHeight = std::min((unsigned int)displayUsableBounds.h, windowHeight);
+				}
 			}
 		}
 	}
@@ -2414,10 +3028,23 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 		exit(EXIT_FAILURE);
 	}
 
-	// Check that the actual window size matches the desired window size
+	// Always set the fullscreen mode (so switching works to the desired mode, even if we don't start in fullscreen mode)
+	if (!wzChangeFullscreenDisplayMode(screenIndex, war_GetFullscreenModeWidth(), war_GetFullscreenModeHeight()))
+	{
+		if (fullscreen == WINDOW_MODE::fullscreen)
+		{
+			debug(LOG_ERROR, "Failed to initialize at fullscreen mode ([%d] [%u x %u]); reverting to windowed mode", screenIndex, war_GetFullscreenModeWidth(), war_GetFullscreenModeHeight());
+			wzChangeWindowMode(WINDOW_MODE::windowed);
+			fullscreen = WINDOW_MODE::windowed;
+		}
+	}
+
+	// Get resulting logical window size
 	int resultingWidth, resultingHeight = 0;
 	SDL_GetWindowSize(WZwindow, &resultingWidth, &resultingHeight);
-	if (resultingWidth < minWindowWidth || resultingHeight < minWindowHeight)
+
+	// Check that the actual window size matches the desired window size (but not for classic fullscreen mode)
+	if ((wzGetCurrentWindowMode() != WINDOW_MODE::fullscreen) && (resultingWidth < minWindowWidth || resultingHeight < minWindowHeight))
 	{
 		// The created window size (that the system returned) is less than the minimum required window size (for this display scale)
 		debug(LOG_WARNING, "Failed to create window at desired resolution: [%d] %d x %d; instead, received window of resolution: [%d] %d x %d; which is below the required minimum size of %d x %d for the current display scale level", war_GetScreen(), windowWidth, windowHeight, war_GetScreen(), resultingWidth, resultingHeight, minWindowWidth, minWindowHeight);
@@ -2517,6 +3144,10 @@ optional<SDL_gfx_api_Impl_Factory::Configuration> wzMainScreenSetup_CreateVideoW
 	SDL_gfx_api_Impl_Factory::Configuration sdl_impl_config;
 	sdl_impl_config.useOpenGLES = useOpenGLES;
 	sdl_impl_config.useOpenGLESLibrary = useOpenGLESLibrary;
+	if (backend == video_backend::vulkan)
+	{
+		sdl_impl_config.allowImplicitLayers = war_getAllowVulkanImplicitLayers();
+	}
 	return sdl_impl_config;
 }
 
@@ -2554,7 +3185,7 @@ bool wzMainScreenSetup_VerifyWindow()
 	return true;
 }
 
-bool wzMainScreenSetup(optional<video_backend> backend, int antialiasing, WINDOW_MODE fullscreen, int vsync, bool highDPI)
+bool wzMainScreenSetup(optional<video_backend> backend, int antialiasing, WINDOW_MODE fullscreen, int vsync, int lodDistanceBiasPercentage, uint32_t depthMapResolution, bool highDPI)
 {
 	// Output linked SDL version
 	char buf[512];
@@ -2577,8 +3208,82 @@ bool wzMainScreenSetup(optional<video_backend> backend, int antialiasing, WINDOW
 		debug(LOG_WARNING, "Failed to set hint: SDL_HINT_VIDEO_MAC_FULLSCREEN_SPACES");
 	}
 #endif
+#if defined(WZ_OS_WIN)
+	// on Windows, opt-in to SDL 2.24.0+'s DPI scaling support
+	if (linked_sdl_version.major > 2 || (linked_sdl_version.major == 2 && linked_sdl_version.minor >= 24))
+	{
+		// SDL_HINT_WINDOWS_DPI_AWARENESS does not appear to be needed if SDL_HINT_WINDOWS_DPI_SCALING is set
+		// But set it anyway for completeness
+		if (SDL_SetHint(SDL_HINT_WINDOWS_DPI_AWARENESS, "permonitorv2") == SDL_FALSE)
+		{
+			debug(LOG_ERROR, "Failed to set hint: SDL_HINT_WINDOWS_DPI_AWARENESS");
+		}
+		if (SDL_SetHint(SDL_HINT_WINDOWS_DPI_SCALING, "1") == SDL_FALSE)
+		{
+			debug(LOG_ERROR, "Failed to set hint: SDL_HINT_WINDOWS_DPI_SCALING");
+		}
+	}
+#endif
+	int minOnFocusLossSettingVal = war_getMinimizeOnFocusLoss();
+	if (minOnFocusLossSettingVal < -1 || minOnFocusLossSettingVal > 1)
+	{
+		minOnFocusLossSettingVal = -1;
+	}
+	const char* hint = SDL_GetHint(SDL_HINT_VIDEO_MINIMIZE_ON_FOCUS_LOSS);
+	if (!hint || !*hint || SDL_strcasecmp(hint, "auto") == 0)
+	{
+		wzSetMinimizeOnFocusLoss(static_cast<MinimizeOnFocusLossBehavior>(minOnFocusLossSettingVal));
+	}
+	int toggleFullscreenModeVal = war_getToggleFullscreenMode();
+	switch (toggleFullscreenModeVal)
+	{
+		case -1:
+			wzSetToggleFullscreenMode(WINDOW_MODE::desktop_fullscreen);
+			break;
+		case 1:
+			wzSetToggleFullscreenMode(WINDOW_MODE::fullscreen);
+			break;
+		case 0:
+		default:
+			altEnterToggleFullscreenMode = WZ_SDL_DEFAULT_FULLSCREEN_MODE;
+			break;
+	}
 
 	WZbackend = backend;
+
+#if defined(WZ_OS_WIN)
+	// Windows: Workaround for Nvidia "threaded optimization"
+	// Set the process affinity mask to 1 before creating the window and initializing OpenGL
+	// This disables Nvidia's "threaded optimization" feature, which can cause issues with WZ in OpenGL mode
+	// NOTE: Must restore the affinity mask afterwards! (See below)
+	DWORD_PTR originalProcessAffinityMask = 0;
+	DWORD_PTR systemAffinityMask = 0;
+	bool restoreAffinityMask = false;
+
+	if (backend.has_value() && (backend.value() == video_backend::opengl)) // only do this for OpenGL mode, for now
+	{
+		if (::GetProcessAffinityMask(::GetCurrentProcess(), &originalProcessAffinityMask, &systemAffinityMask) != 0)
+		{
+			if (::SetProcessAffinityMask(::GetCurrentProcess(), 1) != 0)
+			{
+				restoreAffinityMask = true;
+			}
+			else
+			{
+				debug(LOG_INFO, "Failed to set process affinity mask");
+			}
+		}
+		else
+		{
+			// Failed to get the current process affinity mask
+			debug(LOG_INFO, "Failed to get current process affinity mask");
+		}
+	}
+#endif
+
+#if defined(__EMSCRIPTEN__)
+	wzemscripten_startup_ensure_canvas_displayed();
+#endif
 
 	SDL_gfx_api_Impl_Factory::Configuration sdl_impl_config;
 
@@ -2626,7 +3331,13 @@ bool wzMainScreenSetup(optional<video_backend> backend, int antialiasing, WINDOW
 		}
 	}
 
-	if (!gfx_api::context::initialize(SDL_gfx_api_Impl_Factory(WZwindow, sdl_impl_config), antialiasing, vsyncMode, gfxapi_backend))
+	optional<float> lodDistanceBias = nullopt;
+	if (lodDistanceBiasPercentage != 0)
+	{
+		lodDistanceBias = static_cast<float>(lodDistanceBiasPercentage) / 100.f;
+	}
+
+	if (!gfx_api::context::initialize(SDL_gfx_api_Impl_Factory(WZwindow, sdl_impl_config), antialiasing, vsyncMode, lodDistanceBias, depthMapResolution, gfxapi_backend))
 	{
 		// Failed to initialize desired backend / renderer settings
 		if (backend.has_value())
@@ -2654,7 +3365,36 @@ bool wzMainScreenSetup(optional<video_backend> backend, int antialiasing, WINDOW
 	if (backend.has_value())
 	{
 		wzMainScreenSetup_VerifyWindow();
+
+#if defined(__EMSCRIPTEN__)
+		// Catch the full screen change events
+		// - If user-initiated (i.e. by pressing ESC or similar to exit fullscreen), SDL does not currently expose this event
+		// - SDL itself sets a fullscreenchange callback on the document, which must remain for SDL functionality - fortunately, emscripten lets us set one on the canvas element itself
+		emscripten_set_fullscreenchange_callback("#canvas", nullptr, 0, wz_emscripten_fullscreenchange_callback);
+
+		auto mode = wzGetCurrentWindowMode();
+		if (mode == WINDOW_MODE::windowed)
+		{
+			// Enable "soft fullscreen" - where the canvas automatically fills the window
+			wz_emscripten_enable_soft_fullscreen();
+		}
+#endif
 	}
+
+#if defined(WZ_OS_WIN)
+	if (restoreAffinityMask)
+	{
+		// restore process affinity mask
+		if (::SetProcessAffinityMask(::GetCurrentProcess(), originalProcessAffinityMask) != 0)
+		{
+			debug(LOG_WZ, "Restored process affinity mask");
+		}
+		else
+		{
+			debug(LOG_ERROR, "Failed to restore process affinity mask");
+		}
+	}
+#endif
 
 	return true;
 }
@@ -2691,18 +3431,18 @@ void wzGetWindowToRendererScaleFactor(float *horizScaleFactor, float *vertScaleF
 	SDL_WZBackend_GetDrawableSize(WZwindow, &drawableWidth, &drawableHeight);
 
 	// Obtain the logical window size (in points)
-	int logicalWindowWidth, logicalWindowHeight = 0;
+	int logicalWindowWidth = 0, logicalWindowHeight = 0;
 	SDL_GetWindowSize(WZwindow, &logicalWindowWidth, &logicalWindowHeight);
 
 	debug(LOG_WZ, "Window Logical Size (%d, %d) vs Drawable Size in Pixels (%d, %d)", logicalWindowWidth, logicalWindowHeight, drawableWidth, drawableHeight);
 
 	if (horizScaleFactor != nullptr)
 	{
-		*horizScaleFactor = ((float)drawableWidth / (float)logicalWindowWidth) * current_displayScaleFactor;
+		*horizScaleFactor = ((float)drawableWidth / (float)logicalWindowWidth); // Do **NOT** multiply by current_displayScaleFactor
 	}
 	if (vertScaleFactor != nullptr)
 	{
-		*vertScaleFactor = ((float)drawableHeight / (float)logicalWindowHeight) * current_displayScaleFactor;
+		*vertScaleFactor = ((float)drawableHeight / (float)logicalWindowHeight); // Do **NOT** multiply by current_displayScaleFactor
 	}
 
 	int displayIndex = SDL_GetWindowDisplayIndex(WZwindow);
@@ -2753,6 +3493,22 @@ void wzGetGameToRendererScaleFactor(float *horizScaleFactor, float *vertScaleFac
 	if (vertScaleFactor != nullptr)
 	{
 		*vertScaleFactor = vertWindowScaleFactor * current_displayScaleFactor;
+	}
+}
+void wzGetGameToRendererScaleFactorInt(unsigned int *horizScalePercentage, unsigned int *vertScalePercentage)
+{
+	float horizWindowScaleFactor = 0.f, vertWindowScaleFactor = 0.f;
+	wzGetWindowToRendererScaleFactor(&horizWindowScaleFactor, &vertWindowScaleFactor);
+	assert(horizWindowScaleFactor != 0.f);
+	assert(vertWindowScaleFactor != 0.f);
+
+	if (horizScalePercentage != nullptr)
+	{
+		*horizScalePercentage = static_cast<unsigned int>(ceil(horizWindowScaleFactor * current_displayScale));
+	}
+	if (vertScalePercentage != nullptr)
+	{
+		*vertScalePercentage = static_cast<unsigned int>(ceil(vertWindowScaleFactor * current_displayScale));
 	}
 }
 
@@ -2835,27 +3591,65 @@ static void handleActiveEvent(SDL_Event *event)
 				handleWindowSizeChange(oldWindowWidth, oldWindowHeight, newWindowWidth, newWindowHeight);
 
 				// Store the new values (in case the user manually resized the window bounds)
-				war_SetWidth(newWindowWidth);
-				war_SetHeight(newWindowHeight);
+				if (wzGetCurrentWindowMode() == WINDOW_MODE::windowed)
+				{
+					war_SetWidth(newWindowWidth);
+					war_SetHeight(newWindowHeight);
+				}
+
+				// Handle deferred size reset
+				if (deferredDimensionReset.has_value())
+				{
+					if (WZwindow != nullptr)
+					{
+						SDL_SetWindowSize(WZwindow, deferredDimensionReset.value().width, deferredDimensionReset.value().height);
+						if (deferredDimensionReset.value().recenter)
+						{
+							SDL_SetWindowPosition(WZwindow, SDL_WINDOWPOS_CENTERED_DISPLAY(screenIndex), SDL_WINDOWPOS_CENTERED_DISPLAY(screenIndex));
+						}
+						wzReduceDisplayScalingIfNeeded(deferredDimensionReset.value().width, deferredDimensionReset.value().height);
+					}
+					deferredDimensionReset.reset();
+				}
 			}
 			break;
 		case SDL_WINDOWEVENT_MINIMIZED:
-			debug(LOG_WZ, "Window %d minimized", event->window.windowID);
+			debug(LOG_INFO, "Window %d minimized", event->window.windowID);
 			break;
 		case SDL_WINDOWEVENT_MAXIMIZED:
 			debug(LOG_WZ, "Window %d maximized", event->window.windowID);
 			break;
 		case SDL_WINDOWEVENT_RESTORED:
-			debug(LOG_WZ, "Window %d restored", event->window.windowID);
+			debug(LOG_INFO, "Window %d restored", event->window.windowID);
+			{
+				unsigned int oldWindowWidth = windowWidth;
+				unsigned int oldWindowHeight = windowHeight;
+
+				int newWindowWidth = 0, newWindowHeight = 0;
+				SDL_GetWindowSize(WZwindow, &newWindowWidth, &newWindowHeight);
+
+				int newDrawableWidth = 0, newDrawableHeight = 0;
+				SDL_WZBackend_GetDrawableSize(WZwindow, &newDrawableWidth, &newDrawableHeight);
+				auto oldDrawableDimensions = gfx_api::context::get().getDrawableDimensions();
+
+				if (oldWindowWidth != newWindowWidth || oldWindowHeight != newWindowHeight
+					|| oldDrawableDimensions.first != newDrawableWidth || oldDrawableDimensions.second != newDrawableHeight)
+				{
+					debug(LOG_WZ, "Triggering handleWindowSizeChange from window restore event");
+					handleWindowSizeChange(oldWindowWidth, oldWindowHeight, newWindowWidth, newWindowHeight);
+				}
+			}
 			break;
 		case SDL_WINDOWEVENT_ENTER:
 			debug(LOG_WZ, "Mouse entered window %d", event->window.windowID);
+			wzQueueRefreshCursor();
 			break;
 		case SDL_WINDOWEVENT_LEAVE:
 			debug(LOG_WZ, "Mouse left window %d", event->window.windowID);
 			break;
 		case SDL_WINDOWEVENT_FOCUS_GAINED:
 			mouseInWindow = SDL_TRUE;
+			wzQueueRefreshCursor();
 			debug(LOG_WZ, "Window %d gained keyboard focus", event->window.windowID);
 			break;
 		case SDL_WINDOWEVENT_FOCUS_LOST:
@@ -2876,67 +3670,121 @@ static void handleActiveEvent(SDL_Event *event)
 	}
 }
 
-// Actual mainloop
-void wzMainEventLoop(void)
+static SDL_Event event;
+#if defined(__EMSCRIPTEN__)
+std::function<void()> saved_onShutdown;
+unsigned lastLoopReturn = 0;
+#endif
+
+void wzEventLoopOneFrame(void* arg)
 {
-	SDL_Event event;
-
-	while (true)
+#if defined(__EMSCRIPTEN__)
+	if (lastLoopReturn > 0)
 	{
-		/* Deal with any windows messages */
-		while (SDL_PollEvent(&event))
-		{
-			switch (event.type)
-			{
-			case SDL_KEYUP:
-			case SDL_KEYDOWN:
-				inputHandleKeyEvent(&event.key);
-				break;
-			case SDL_MOUSEBUTTONUP:
-			case SDL_MOUSEBUTTONDOWN:
-				inputHandleMouseButtonEvent(&event.button);
-				break;
-			case SDL_MOUSEMOTION:
-				inputHandleMouseMotionEvent(&event.motion);
-				break;
-			case SDL_MOUSEWHEEL:
-				inputHandleMouseWheelEvent(&event.wheel);
-				break;
-			case SDL_WINDOWEVENT:
-				handleActiveEvent(&event);
-				break;
-			case SDL_TEXTINPUT:	// SDL now handles text input differently
-				inputhandleText(&event.text);
-				break;
-			case SDL_QUIT:
-				return;
-			default:
-				break;
-			}
+		wz_emscripten_did_finish_render(lastLoopReturn - wzGetTicks());
+	}
+#endif
 
-			if (wzSDLAppEvent == event.type)
+	/* Deal with any windows messages */
+	while (SDL_PollEvent(&event))
+	{
+		switch (event.type)
+		{
+		case SDL_KEYUP:
+		case SDL_KEYDOWN:
+			inputHandleKeyEvent(&event.key);
+			break;
+		case SDL_MOUSEBUTTONUP:
+		case SDL_MOUSEBUTTONDOWN:
+			inputHandleMouseButtonEvent(&event.button);
+			break;
+		case SDL_MOUSEMOTION:
+			inputHandleMouseMotionEvent(&event.motion);
+			break;
+		case SDL_MOUSEWHEEL:
+			inputHandleMouseWheelEvent(&event.wheel);
+			break;
+		case SDL_WINDOWEVENT:
+			handleActiveEvent(&event);
+			break;
+		case SDL_TEXTINPUT:	// SDL now handles text input differently
+			inputhandleText(&event.text);
+			break;
+		case SDL_QUIT:
+#if defined(__EMSCRIPTEN__)
+			// Exit "soft fullscreen" - (as long as we aren't in "real" fullscreen mode)
+			emscripten_exit_soft_fullscreen();
+
+			// Actually trigger cleanup code
+			if (saved_onShutdown)
 			{
-				// Custom WZ App Event
-				switch (event.user.code)
-				{
-					case wzSDLAppEventCodes::MAINTHREADEXEC:
-						if (event.user.data1 != nullptr)
-						{
-							WZ_MAINTHREADEXEC * pExec = static_cast<WZ_MAINTHREADEXEC *>(event.user.data1);
-							pExec->doExecOnMainThread();
-							delete pExec;
-						}
-						break;
-					default:
-						break;
-				}
+				saved_onShutdown();
 			}
+			wzShutdown();
+
+			// Stop Emscripten from calling the main loop
+			emscripten_cancel_main_loop();
+#else
+			ASSERT(arg != nullptr, "No valid bContinue");
+			if (arg)
+			{
+				bool *bContinue = static_cast<bool*>(arg);
+				*bContinue = false;
+			}
+#endif
+			return;
+		default:
+			break;
 		}
 
-		processScreenSizeChangeNotificationIfNeeded();
-		mainLoop();				// WZ does its thing
-		inputNewFrame();			// reset input states
+		if (wzSDLAppEvent == event.type)
+		{
+			// Custom WZ App Event
+			switch (event.user.code)
+			{
+				case wzSDLAppEventCodes::MAINTHREADEXEC:
+					if (event.user.data1 != nullptr)
+					{
+						WZ_MAINTHREADEXEC * pExec = static_cast<WZ_MAINTHREADEXEC *>(event.user.data1);
+						pExec->doExecOnMainThread();
+						delete pExec;
+					}
+					break;
+				default:
+					break;
+			}
+		}
 	}
+
+	processScreenSizeChangeNotificationIfNeeded();
+	mainLoop();				// WZ does its thing
+	inputNewFrame();			// reset input states
+#if defined(__EMSCRIPTEN__)
+	lastLoopReturn = wzGetTicks();
+#endif
+}
+
+// Actual mainloop
+void wzMainEventLoop(std::function<void()> onShutdown)
+{
+	event.type = 0;
+
+#if defined(__EMSCRIPTEN__)
+	saved_onShutdown = onShutdown;
+	// Receives a function to call and some user data to provide it.
+	emscripten_set_main_loop_arg(wzEventLoopOneFrame, nullptr, -1, true);
+#else
+	bool bContinue = true;
+	while (bContinue)
+	{
+		wzEventLoopOneFrame(&bContinue);
+	}
+
+	if (onShutdown)
+	{
+		onShutdown();
+	}
+#endif
 }
 
 void wzPumpEventsWhileLoading()
@@ -2982,3 +3830,83 @@ bool wzBackendAttemptOpenURL(const char *url)
 	// SDL_OpenURL requires SDL >= 2.0.14
 	return false;
 }
+
+// Gets the system RAM in MiB
+uint64_t wzGetCurrentSystemRAM()
+{
+	int value = SDL_GetSystemRAM();
+	return (value > 0) ? static_cast<uint64_t>(value) : 0;
+}
+
+// MARK: - Emscripten-specific functions
+
+#if defined(__EMSCRIPTEN__)
+
+void wzemscripten_startup_ensure_canvas_displayed()
+{
+	MAIN_THREAD_EM_ASM({
+		if (typeof wz_js_display_canvas === "function") {
+			wz_js_display_canvas();
+		}
+		else {
+			console.log('Cannot find wz_js_display_canvas function');
+		}
+	});
+}
+
+EM_BOOL wz_emscripten_window_resized_callback(int eventType, const void *reserved, void *userData)
+{
+	double width, height;
+	emscripten_get_element_css_size("#canvas", &width, &height);
+
+	int newWindowWidth = (int)width, newWindowHeight = (int)height;
+
+	wzAsyncExecOnMainThread([newWindowWidth, newWindowHeight]{
+		// resize SDL window
+		SDL_SetWindowSize(WZwindow, newWindowWidth, newWindowHeight);
+
+		unsigned int oldWindowWidth = windowWidth;
+		unsigned int oldWindowHeight = windowHeight;
+		handleWindowSizeChange(oldWindowWidth, oldWindowHeight, newWindowWidth, newWindowHeight);
+		// Store the new values (in case the user manually resized the window bounds)
+		war_SetWidth(newWindowWidth);
+		war_SetHeight(newWindowHeight);
+	});
+	return EMSCRIPTEN_RESULT_SUCCESS;
+}
+
+bool wz_emscripten_enable_soft_fullscreen()
+{
+	// Enable "soft fullscreen" - where the canvas automatically fills the window
+	debug(LOG_INFO, "Would enter soft fullscreen");
+	EmscriptenFullscreenStrategy strategy;
+	strategy.scaleMode = EMSCRIPTEN_FULLSCREEN_CANVAS_SCALE_STDDEF;
+	strategy.filteringMode = EMSCRIPTEN_FULLSCREEN_FILTERING_DEFAULT;
+	strategy.canvasResizedCallback = wz_emscripten_window_resized_callback;
+	strategy.canvasResizedCallbackUserData = nullptr; // pointer to user data
+	strategy.canvasResizedCallbackTargetThread = pthread_self(); // not used
+	EMSCRIPTEN_RESULT result = emscripten_enter_soft_fullscreen("#canvas", &strategy);
+	return result == EMSCRIPTEN_RESULT_SUCCESS || result == EMSCRIPTEN_RESULT_DEFERRED;
+}
+
+EM_BOOL wz_emscripten_fullscreenchange_callback(int eventType, const EmscriptenFullscreenChangeEvent *fullscreenChangeEvent, void *userData)
+{
+	if (!fullscreenChangeEvent->isFullscreen)
+	{
+		// browser left fullscreen, so reset soft fullscreen mode
+		wzAsyncExecOnMainThread([]{
+
+			war_setWindowMode(WINDOW_MODE::windowed); // persist the change
+
+			wz_emscripten_enable_soft_fullscreen();
+
+			// manually trigger resize callback
+			wz_emscripten_window_resized_callback(EMSCRIPTEN_EVENT_FULLSCREENCHANGE, nullptr, nullptr);
+
+		});
+	}
+
+	return EM_FALSE; // return false to ensure this event "bubbles up" to the SDL event handler
+}
+
+#endif

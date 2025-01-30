@@ -28,11 +28,14 @@
 #include "lib/framework/physfs_ext.h"
 #include "lib/widget/gridlayout.h"
 #include "lib/widget/alignment.h"
-#include "lib/widget/minsize.h"
+#include "lib/widget/resize.h"
 #include "lib/widget/margin.h"
 #include "lib/widget/button.h"
 #include "lib/widget/label.h"
 #include "lib/widget/widget.h"
+#include "lib/widget/multibutform.h"
+#include "lib/widget/paneltabbutton.h"
+#include "lib/widget/editbox.h"
 
 #include "display3d.h"
 #include "intdisplay.h"
@@ -65,6 +68,8 @@
 #include "keybind.h"
 #include "loop.h"
 #include "frontend.h"
+#include "hci/teamstrategy.h"
+#include "multivote.h"
 
 // ////////////////////////////////////////////////////////////////////////////
 // defines
@@ -78,7 +83,7 @@ static UDWORD	current_context = 0;
 UDWORD	current_numplayers = 4;
 static std::string current_searchString;
 
-#define MULTIMENU_FORM_Y		23 + D_H
+#define MULTIMENU_FORM_Y		25
 
 #define MULTIMENU_CLOSE			(MULTIMENU+1)
 #define MULTIMENU_PLAYER		(MULTIMENU+2)
@@ -115,6 +120,8 @@ static const unsigned M_REQUEST_NP[] = {M_REQUEST_2P,    M_REQUEST_3P,    M_REQU
 #define M_REQUEST_BUT	(MULTIMENU+100)		// allow loads of buttons.
 #define M_REQUEST_BUTM	(MULTIMENU+1100)
 
+#define MULTIMENU_PLAYER_MUTE_START M_REQUEST_BUTM + 1
+
 #define M_REQUEST_X		MULTIOP_PLAYERSX
 #define M_REQUEST_Y		MULTIOP_PLAYERSY
 #define M_REQUEST_W		MULTIOP_PLAYERSW
@@ -139,7 +146,7 @@ static bool		giftsUp[MAX_PLAYERS] = {true};		//gift buttons for player are up.
 static PIELIGHT GetPlayerTextColor(int mode, UDWORD player)
 {
 	// override color if they are dead...
-	if (player >= MAX_PLAYERS || (!apsDroidLists[player] && !apsStructLists[player]))
+	if (player >= MAX_PLAYERS || (apsDroidLists[player].empty() && apsStructLists[player].empty()))
 	{
 		return WZCOL_GREY;			// dead text color
 	}
@@ -178,7 +185,7 @@ public:
 	}
 	void setCachedText(const std::string &text, iV_fonts fontID, const std::string &fullButString, int widgetWidth)
 	{
-		wzText.setText(text, fontID);
+		wzText.setText(WzString::fromUtf8(text), fontID);
 		_fullButString = fullButString;
 		_widgetWidth = widgetWidth;
 	}
@@ -276,7 +283,7 @@ void displayRequestOption(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 		{
 			iV_DrawImage(FrontImages, IMAGE_WEE_GUY, x + 6 * count + 6, y + 16);
 		}
-		if (CheckForRandom(mapData->realFileName, mapData->apDataFiles[0]))
+		if (CheckForRandom(mapData->realFileName, mapData->apDataFiles[0].c_str()))
 		{
 			iV_DrawImage(FrontImages, IMAGE_WEE_DIE, x + 80 + 6, y + 15);
 		}
@@ -473,13 +480,30 @@ void addMultiRequest(const char *searchDir, const char *fileExtension, UDWORD mo
 
 	if (mode == MULTIOP_MAP)
 	{
+		// Add the search edit box
+		auto searchBox = std::make_shared<W_EDITBOX>();
+		requestForm->attach(searchBox);
+		searchBox->setGeometry(3, requestForm->height() - MULTIOP_SEARCHBOXH - 3, requestForm->width() - 6, MULTIOP_SEARCHBOXH);
+		searchBox->setBoxColours(WZCOL_MENU_BORDER, WZCOL_MENU_BORDER, WZCOL_MENU_BACKGROUND);
+		searchBox->setPlaceholder(_("Search for map"));
+		searchBox->setString(WzString::fromUtf8(current_searchString));
+
+		searchBox->setOnEditingStoppedHandler([searchDir, fileExtension, mode, numPlayers](W_EDITBOX& widg) {
+			std::string value = widg.getString().toUtf8();
+			if (value == current_searchString) {
+				return;
+			}
+			closeMultiRequester();
+			addMultiRequest(searchDir, fileExtension, mode, numPlayers, value);
+		});
+
 		LEVEL_LIST levels = enumerateMultiMaps(game.techLevel, numPlayers);
 		using Pair = std::pair<int, std::shared_ptr<W_BUTTON>>;
 		std::vector<Pair> buttons;
 
 		for (auto mapData : levels)
 		{
-			std::string withoutTechlevel = mapNameWithoutTechlevel(mapData->pName);
+			std::string withoutTechlevel = mapNameWithoutTechlevel(mapData->pName.c_str());
 			// add number of players to string.
 			auto button = std::make_shared<W_BUTTON>();
 			requestList->attach(button);
@@ -581,8 +605,16 @@ bool runMultiRequester(UDWORD id, UDWORD *mode, WzString *chosen, LEVEL_DATASET 
 		*chosen = ((W_BUTTON *)widgGetFromID(psRScreen, id))->pText;
 
 		DisplayRequestOptionData * pData = static_cast<DisplayRequestOptionData *>(((W_BUTTON *)widgGetFromID(psRScreen, id))->pUserData);
-		assert(pData != nullptr);
-		*chosenValue = (LEVEL_DATASET *)pData->pMapData;
+		ASSERT_OR_RETURN(false, pData != nullptr, "Unable to get map data pointer for: %s", chosen->toUtf8().c_str());
+		if (current_context == MULTIOP_MAP)
+		{
+			ASSERT_OR_RETURN(false, pData->pMapData != nullptr, "Unable to get map data: %s", chosen->toUtf8().c_str());
+			*chosenValue = (LEVEL_DATASET *)pData->pMapData;
+		}
+		else
+		{
+			*chosenValue = nullptr;
+		}
 		*mode = current_context;
 		*isHoverPreview = hoverPreview;
 		hoverPreviewId = id;
@@ -679,6 +711,31 @@ static void displayChannelState(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset
 	psWidget->UserData = player;
 }
 
+static void displayMuteState(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
+{
+	UDWORD player = psWidget->UserData;
+	ASSERT_OR_RETURN(, player < MAX_CONNECTED_PLAYERS, "invalid player: %" PRIu32 "", player);
+
+	UWORD ImageID = IMAGE_INTFAC_VOLUME_UP;
+	if (!ingame.muteChat[player])
+	{
+		ImageID = IMAGE_INTFAC_VOLUME_UP;
+	}
+	else
+	{
+		ImageID = IMAGE_INTFAC_VOLUME_MUTE;
+	}
+	int x = xOffset + psWidget->x();
+	int y = yOffset + psWidget->y();
+	bool isHighlighted = (psWidget->getState() & WBUT_HIGHLIGHT) != 0;
+	bool isDown = (psWidget->getState() & WBUT_DOWN) != 0;
+	if (isHighlighted || isDown)
+	{
+		pie_UniTransBoxFill(x-2, y-2, x + 16 + 4, y + 16 + 4, (isDown) ? WZCOL_TRANSPARENT_BOX : pal_RGBA(255, 255, 255, 65));
+	}
+	iV_DrawImageFileAnisotropic(IntImages, ImageID, x + 1, y + 1, Vector2f{16,16});
+}
+
 
 // ////////////////////////////////////////////////////////////////////////////
 
@@ -693,16 +750,21 @@ public:
 	void display(int xOffset, int yOffset) override
 	{
 		// a droid of theirs.
-		DROID *displayDroid = (player < MAX_PLAYERS) ? apsDroidLists[player] : nullptr;
-		while (displayDroid != nullptr && !displayDroid->visibleForLocalDisplay())
+		DroidList* displayDroidList = (player < MAX_PLAYERS) ? &apsDroidLists[player] : nullptr;
+		if (!displayDroidList)
 		{
-			displayDroid = displayDroid->psNext;
+			return;
 		}
+		auto displayDroidIt = std::find_if(displayDroidList->begin(), displayDroidList->end(), [](DROID* d)
+		{
+			return d->visibleForLocalDisplay();
+		});
 
 		auto centerX = xOffset + x() + width() / 2;
 		auto y0 = yOffset + y();
-		if (displayDroid)
+		if (displayDroidIt != displayDroidList->end())
 		{
+			DROID* displayDroid = *displayDroidIt;
 			pie_SetGeometricOffset(centerX, y0 + height() * 3 / 4);
 			Vector3i rotation(-15, 45, 0);
 			Position position(0, 0, BUTTON_DEPTH);  // Scale them.
@@ -717,7 +779,7 @@ public:
 
 			displayComponentButtonObject(displayDroid, &rotation, &position, 100);
 		}
-		else if ((player < MAX_PLAYERS) && apsDroidLists[player])
+		else if ((player < MAX_PLAYERS) && !apsDroidLists[player].empty())
 		{
 			// Show that they have droids, but not which droids, since we can't see them.
 			iV_DrawImageTc(
@@ -774,12 +836,13 @@ private:
 		structsLabel = makeLabel(_("Structs"));
 		place({0}, {0}, margin.wrap(Alignment::center().wrap(timerLabel)));
 		place({1}, {0}, margin.wrap(makeLabel(_("Alliances"))));
-		place({2}, {0}, MinSize::minWidth(100).wrap(margin.wrap(makeLabel(_("Score")))));
-		place({3}, {0}, MinSize::minWidth(50).wrap(margin.wrap(makeLabel(_("Kills")))));
-		place({4}, {0}, MinSize::minWidth(50).wrap(margin.wrap(makeLabel(_("Units")))));
-		place({5}, {0}, MinSize::minWidth(50).wrap(lastMargin.wrap(powerLabel)));
-		place({5}, {0}, MinSize::minWidth(50).wrap(lastMargin.wrap(pingLabel)));
-		place({5}, {0}, MinSize::minWidth(50).wrap(lastMargin.wrap(structsLabel)));
+		place({2}, {0}, Resize::width(100).wrap(margin.wrap(makeLabel(_("Score")))));
+		place({3}, {0}, Resize::width(50).wrap(margin.wrap(makeLabel(_("Kills")))));
+		place({4}, {0}, Resize::width(50).wrap(margin.wrap(makeLabel(_("Units")))));
+		place({5}, {0}, Resize::width(50).wrap(lastMargin.wrap(powerLabel)));
+		place({5}, {0}, Resize::width(50).wrap(lastMargin.wrap(pingLabel)));
+		place({5}, {0}, Resize::width(50).wrap(lastMargin.wrap(structsLabel)));
+		place({6}, {0}, Resize::width(16).wrap(lastMargin.wrap(makeLabel(""))));
 
 		for (auto player = 0; player < MAX_CONNECTED_PLAYERS; player++)
 		{
@@ -830,7 +893,24 @@ private:
 			sButInit.pTip	= _("Channel");
 			sButInit.pDisplay = displayChannelState;
 			sButInit.UserData = player;
-			alliancesGrid->place({0}, {0}, Margin(0, 1, 0, 0).wrap(std::make_shared<W_BUTTON>(&sButInit)));
+
+			auto channelButton = std::make_shared<W_BUTTON>(&sButInit);
+			channelButton->addOnClickHandler([player](W_BUTTON&) {
+				UBYTE i = (UBYTE)player;
+				openchannels[i] = !openchannels[i];
+
+				if (mouseDown(MOUSE_RMB) && NetPlay.isHost) // both buttons....
+				{
+					// Allow the host to kick the AI only in a MP game, or if they activated cheats in a skirmish game
+					if ((NetPlay.bComms || Cheated) && (NetPlay.players[i].allocated || (NetPlay.players[i].allocated == false && NetPlay.players[i].ai != AI_OPEN)))
+					{
+						inputLoseFocus();
+						startKickVote(static_cast<uint32_t>(i));
+						return;
+					}
+				}
+			});
+			alliancesGrid->place({0}, {0}, Margin(0, 1, 0, 0).wrap(channelButton));
 		}
 
 		if (alliancesCanGiveAnything(game.alliance) && player != selectedPlayer && player < MAX_PLAYERS && !NetPlay.players[player].isSpectator)
@@ -847,7 +927,29 @@ private:
 			//can't break alliances in 'Locked Teams' mode
 			if (!alliancesFixed(game.alliance))
 			{
-				alliancesGrid->place({1}, {0}, Margin(0, 1, 0, 0).wrap(std::make_shared<W_BUTTON>(&sButInit)));
+				auto allianceButton = std::make_shared<W_BUTTON>(&sButInit);
+				allianceButton->addOnClickHandler([player](W_BUTTON& widg){
+					UBYTE i = (UBYTE)(player);
+
+					switch (alliances[selectedPlayer][i])
+					{
+					case ALLIANCE_BROKEN:
+						requestAlliance((UBYTE)selectedPlayer, i, true, true);			// request an alliance
+						break;
+					case ALLIANCE_INVITATION:
+						formAlliance((UBYTE)selectedPlayer, i, true, true, true);			// form an alliance
+						break;
+					case ALLIANCE_REQUESTED:
+						breakAlliance((UBYTE)selectedPlayer, i, true, true);		// break an alliance
+						break;
+					case ALLIANCE_FORMED:
+						breakAlliance((UBYTE)selectedPlayer, i, true, true);		// break an alliance
+						break;
+					default:
+						break;
+					}
+				});
+				alliancesGrid->place({1}, {0}, Margin(0, 1, 0, 0).wrap(allianceButton));
 			}
 
 			sButInit.pDisplay = intDisplayImageHilight;
@@ -861,23 +963,39 @@ private:
 				sButInit.id		= MULTIMENU_GIFT_RAD + player;
 				sButInit.pTip	= _("Give Visibility Report");
 				sButInit.UserData = PACKDWORD_TRI(0, IMAGE_MULTI_VIS_HI, IMAGE_MULTI_VIS);
-				alliancesGrid->place({2}, {0}, wrapGift(std::make_shared<W_BUTTON>(&sButInit)));
+				auto visGiftButton = std::make_shared<W_BUTTON>(&sButInit);
+				visGiftButton->addOnClickHandler([player](W_BUTTON&) {
+					sendGift(RADAR_GIFT, static_cast<uint8_t>(player));
+				});
+				alliancesGrid->place({2}, {0}, wrapGift(visGiftButton));
 
 				sButInit.id		= MULTIMENU_GIFT_RES + player;
 				sButInit.pTip	= _("Leak Technology Documents");
 				sButInit.UserData = PACKDWORD_TRI(0, IMAGE_MULTI_TEK_HI , IMAGE_MULTI_TEK);
-				alliancesGrid->place({3}, {0}, wrapGift(std::make_shared<W_BUTTON>(&sButInit)));
+				auto resGiftButton = std::make_shared<W_BUTTON>(&sButInit);
+				resGiftButton->addOnClickHandler([player](W_BUTTON&) {
+					sendGift(RESEARCH_GIFT, static_cast<uint8_t>(player));
+				});
+				alliancesGrid->place({3}, {0}, wrapGift(resGiftButton));
 			}
 
 			sButInit.id		= MULTIMENU_GIFT_DRO + player;
 			sButInit.pTip	= _("Hand Over Selected Units");
 			sButInit.UserData = PACKDWORD_TRI(0, IMAGE_MULTI_DRO_HI , IMAGE_MULTI_DRO);
-			alliancesGrid->place({4}, {0}, wrapGift(std::make_shared<W_BUTTON>(&sButInit)));
+			auto droidGiftButton = std::make_shared<W_BUTTON>(&sButInit);
+			droidGiftButton->addOnClickHandler([player](W_BUTTON&) {
+				sendGift(DROID_GIFT, static_cast<uint8_t>(player));
+			});
+			alliancesGrid->place({4}, {0}, wrapGift(droidGiftButton));
 
 			sButInit.id		= MULTIMENU_GIFT_POW + player;
 			sButInit.pTip	= _("Give Power To Player");
 			sButInit.UserData = PACKDWORD_TRI(0, IMAGE_MULTI_POW_HI , IMAGE_MULTI_POW);
-			alliancesGrid->place({5}, {0}, wrapGift(std::make_shared<W_BUTTON>(&sButInit)));
+			auto pwrGiftButton = std::make_shared<W_BUTTON>(&sButInit);
+			pwrGiftButton->addOnClickHandler([player](W_BUTTON&) {
+				sendGift(POWER_GIFT, static_cast<uint8_t>(player));
+			});
+			alliancesGrid->place({5}, {0}, wrapGift(pwrGiftButton));
 
 			giftsUp[player] = true;				// note buttons are up!
 		}
@@ -899,6 +1017,31 @@ private:
 			lastColumnLabel,
 		});
 
+		// chat mute button
+		std::shared_ptr<WIDGET> muteWidget;
+		if (player != selectedPlayer)
+		{
+			W_BUTINIT sButInit;
+			sButInit.id		= MULTIMENU_PLAYER_MUTE_START + player;
+			sButInit.pTip	= _("Toggle Chat Mute");
+			sButInit.pDisplay = displayMuteState;
+			sButInit.UserData = player;
+			sButInit.width	= 18;
+			sButInit.height = 18;
+			auto muteButton = std::make_shared<W_BUTTON>(&sButInit);
+			muteButton->addOnClickHandler([](W_BUTTON& button) {
+				auto playerIdx = button.UserData;
+				ASSERT_OR_RETURN(, playerIdx < MAX_CONNECTED_PLAYERS, "Invalid playerIdx: %" PRIu32, playerIdx);
+				setPlayerMuted(playerIdx, !ingame.muteChat[playerIdx]);
+			});
+			muteWidget = muteButton;
+		}
+		else
+		{
+			muteWidget = std::make_shared<WIDGET>();
+			muteWidget->setGeometry(0, 0, 0, 0);
+		}
+
 		Margin margin(0, CELL_HORIZONTAL_PADDING);
 		place({0}, {row}, Margin(0, CELL_HORIZONTAL_PADDING, 0, 0).wrap(nameGrid));
 		place({1}, {row}, margin.wrap(Alignment::center().wrap(alliancesGrid)));
@@ -906,6 +1049,7 @@ private:
 		place({3}, {row}, margin.wrap(killsLabel));
 		place({4}, {row}, margin.wrap(unitsLabel));
 		place({5}, {row}, margin.wrap(lastColumnLabel));
+		place({6}, {row}, margin.wrap(Alignment::center().wrap(muteWidget)));
 	}
 
 	void updatePlayersWidgets()
@@ -934,25 +1078,15 @@ private:
 			char lastString[20] = {0};
 
 			// Let's use the real score for MP games
-			if (NetPlay.bComms)
+			if (Cheated && NetPlay.bComms)
 			{
-				if (Cheated)
-				{
-					sstrcpy(scoreString, "(cheated)");
-				}
-				else
-				{
-					ssprintf(scoreString, "%d", getMultiStats(playerWidget.player).recentScore);
-				}
-
-				ssprintf(killsString, "%d", getMultiStats(playerWidget.player).recentKills);
+				sstrcpy(scoreString, "(cheated)");
 			}
 			else
 			{
-				// estimate of scores and kills for skirmish games
-				ssprintf(scoreString, "%d", ingame.skScores[playerWidget.player][0]);
-				ssprintf(killsString, "%d", ingame.skScores[playerWidget.player][1]);
+				ssprintf(scoreString, "%d", getMultiStats(playerWidget.player).recentScore);
 			}
+			ssprintf(killsString, "%d", getMultiStats(playerWidget.player).recentKills);
 
 			//only show player's and allies' unit counts, and nobody elses.
 			if (isAlly || gInputManager.debugManager().debugMappingsAllowed())
@@ -989,11 +1123,7 @@ private:
 				if (isAlly || gInputManager.debugManager().debugMappingsAllowed())
 				{
 					// NOTE, This tallys up *all* the structures you have. Test out via 'start with no base'.
-					int num = 0;
-					for (STRUCTURE *temp = apsStructLists[playerWidget.player]; temp != nullptr; temp = temp->psNext)
-					{
-						++num;
-					}
+					int num = apsStructLists[playerWidget.player].size();
 					ssprintf(lastString, "%d", num);
 				}
 			}
@@ -1002,6 +1132,8 @@ private:
 			playerWidget.kills->setString(killsString);
 			playerWidget.units->setString(unitsString);
 			playerWidget.lastColumn->setString(lastString);
+
+			auto lockedScreen = screenPointer.lock();
 
 			if (isHuman || (game.type == LEVEL_TYPE::SKIRMISH && playerWidget.player < game.maxPlayers))
 			{
@@ -1013,22 +1145,22 @@ private:
 					{
 						if (alliancesCanGiveResearchAndRadar(game.alliance))
 						{
-							widgReveal(psWScreen, MULTIMENU_GIFT_RAD + playerWidget.player);
-							widgReveal(psWScreen, MULTIMENU_GIFT_RES + playerWidget.player);
+							widgReveal(lockedScreen, MULTIMENU_GIFT_RAD + playerWidget.player);
+							widgReveal(lockedScreen, MULTIMENU_GIFT_RES + playerWidget.player);
 						}
-						widgReveal(psWScreen, MULTIMENU_GIFT_DRO + playerWidget.player);
-						widgReveal(psWScreen, MULTIMENU_GIFT_POW + playerWidget.player);
+						widgReveal(lockedScreen, MULTIMENU_GIFT_DRO + playerWidget.player);
+						widgReveal(lockedScreen, MULTIMENU_GIFT_POW + playerWidget.player);
 						giftsUp[playerWidget.player] = true;
 					}
 					else if (!isAlly && !isSelectedPlayer && giftsUp[playerWidget.player])
 					{
 						if (alliancesCanGiveResearchAndRadar(game.alliance))
 						{
-							widgHide(psWScreen, MULTIMENU_GIFT_RAD + playerWidget.player);
-							widgHide(psWScreen, MULTIMENU_GIFT_RES + playerWidget.player);
+							widgHide(lockedScreen, MULTIMENU_GIFT_RAD + playerWidget.player);
+							widgHide(lockedScreen, MULTIMENU_GIFT_RES + playerWidget.player);
 						}
-						widgHide(psWScreen, MULTIMENU_GIFT_DRO + playerWidget.player);
-						widgHide(psWScreen, MULTIMENU_GIFT_POW + playerWidget.player);
+						widgHide(lockedScreen, MULTIMENU_GIFT_DRO + playerWidget.player);
+						widgHide(lockedScreen, MULTIMENU_GIFT_POW + playerWidget.player);
 						giftsUp[playerWidget.player] = false;
 					}
 				}
@@ -1037,18 +1169,18 @@ private:
 			// clean up widgets if player leaves while menu is up.
 			if (!isHuman && !(game.type == LEVEL_TYPE::SKIRMISH && playerWidget.player < game.maxPlayers))
 			{
-				if (widgGetFromID(psWScreen, MULTIMENU_CHANNEL + playerWidget.player) != nullptr)
+				if (widgGetFromID(lockedScreen, MULTIMENU_CHANNEL + playerWidget.player) != nullptr)
 				{
-					widgDelete(psWScreen, MULTIMENU_CHANNEL + playerWidget.player);
+					widgDelete(lockedScreen, MULTIMENU_CHANNEL + playerWidget.player);
 				}
 
-				if (widgGetFromID(psWScreen, MULTIMENU_ALLIANCE_BASE + playerWidget.player) != nullptr)
+				if (widgGetFromID(lockedScreen, MULTIMENU_ALLIANCE_BASE + playerWidget.player) != nullptr)
 				{
-					widgDelete(psWScreen, MULTIMENU_ALLIANCE_BASE + playerWidget.player);
-					widgDelete(psWScreen, MULTIMENU_GIFT_RAD + playerWidget.player);
-					widgDelete(psWScreen, MULTIMENU_GIFT_RES + playerWidget.player);
-					widgDelete(psWScreen, MULTIMENU_GIFT_DRO + playerWidget.player);
-					widgDelete(psWScreen, MULTIMENU_GIFT_POW + playerWidget.player);
+					widgDelete(lockedScreen, MULTIMENU_ALLIANCE_BASE + playerWidget.player);
+					widgDelete(lockedScreen, MULTIMENU_GIFT_RAD + playerWidget.player);
+					widgDelete(lockedScreen, MULTIMENU_GIFT_RES + playerWidget.player);
+					widgDelete(lockedScreen, MULTIMENU_GIFT_DRO + playerWidget.player);
+					widgDelete(lockedScreen, MULTIMENU_GIFT_POW + playerWidget.player);
 					giftsUp[playerWidget.player] = false;
 				}
 			}
@@ -1070,6 +1202,7 @@ public:
 			glm::ivec4(x0 + columns[3], y0, x0 + columns[3], y0 + height()),
 			glm::ivec4(x0 + columns[4], y0, x0 + columns[4], y0 + height()),
 			glm::ivec4(x0 + columns[5], y0, x0 + columns[5], y0 + height()),
+			glm::ivec4(x0 + columns[6], y0, x0 + columns[6], y0 + height()),
 		};
 
 		iV_Lines(lines, WZCOL_BLACK);
@@ -1134,6 +1267,179 @@ private:
 	std::vector<PlayerWidgets> playersWidgets;
 };
 
+class WzMultiMenuTabs : public MultichoiceWidget
+{
+public:
+	WzMultiMenuTabs(int value = -1) : MultichoiceWidget(value) { }
+	virtual void display(int xOffset, int yOffset) override { }
+};
+
+constexpr int MULTIMENUFORM_INTERNAL_PADDING = 10;
+constexpr int MULTIMENUFORM_PANEL_TABS_HEIGHT = 20;
+
+class WzMultiWidget : public IntFormAnimated
+{
+public:
+	WzMultiWidget(bool openAnimate = true)
+	: IntFormAnimated(openAnimate)
+	{ }
+public:
+	static std::shared_ptr<WzMultiWidget> make(bool openAnimate, std::function<void ()> closeButtonHandler);
+protected:
+	virtual void geometryChanged() override;
+	virtual int32_t idealWidth() override;
+	virtual int32_t idealHeight() override;
+private:
+	void initialize(std::function<void ()> closeButtonHandler);
+	void switchAttachedPanel(const std::shared_ptr<WIDGET> newPanel);
+private:
+	std::shared_ptr<W_BUTTON> closeButton;
+	std::shared_ptr<WzMultiMenuTabs> panelSwitcher;
+	std::shared_ptr<MultiMenuGrid> multiMenuGrid;
+	std::shared_ptr<WIDGET> teamStrategyViewWrapped;
+	std::vector<std::shared_ptr<WIDGET>> panels;
+	std::shared_ptr<WIDGET> currentlyAttachedPanel;
+};
+
+std::shared_ptr<WzMultiWidget> WzMultiWidget::make(bool openAnimate, std::function<void ()> closeButtonHandler)
+{
+	auto result = std::make_shared<WzMultiWidget>(openAnimate);
+	result->initialize(closeButtonHandler);
+	return result;
+}
+
+void WzMultiWidget::geometryChanged()
+{
+	if (closeButton)
+	{
+		closeButton->callCalcLayout();
+	}
+	if (panelSwitcher)
+	{
+		panelSwitcher->callCalcLayout();
+	}
+	for (auto& panel : panels)
+	{
+		int panelY0 = 0;
+		if (panelSwitcher)
+		{
+			panelY0 += panelSwitcher->y() + panelSwitcher->height() + MULTIMENUFORM_INTERNAL_PADDING;
+		}
+		int panelHeight = std::min(panel->idealHeight(), height() - panelY0);
+		panel->setGeometry(0, panelY0, width(), panelHeight);
+	}
+}
+
+int32_t WzMultiWidget::idealWidth()
+{
+	int32_t maxPanelIdealWidth = 0;
+	for (auto& panel : panels)
+	{
+		maxPanelIdealWidth = std::max(maxPanelIdealWidth, panel->idealWidth());
+	}
+	return maxPanelIdealWidth;
+}
+
+int32_t WzMultiWidget::idealHeight()
+{
+	int32_t result = 0;
+	if (panelSwitcher)
+	{
+		result += MULTIMENUFORM_INTERNAL_PADDING + panelSwitcher->idealHeight() + MULTIMENUFORM_INTERNAL_PADDING;
+	}
+	int32_t maxPanelIdealHeight = 0;
+	for (auto& panel : panels)
+	{
+		maxPanelIdealHeight = std::max(maxPanelIdealHeight, panel->idealHeight());
+	}
+	result += maxPanelIdealHeight + MULTIMENUFORM_INTERNAL_PADDING;
+	return result;
+}
+
+void WzMultiWidget::switchAttachedPanel(const std::shared_ptr<WIDGET> newPanel)
+{
+	if (currentlyAttachedPanel)
+	{
+		detach(currentlyAttachedPanel);
+	}
+	currentlyAttachedPanel = newPanel;
+	attach(newPanel, ChildZPos::Back);
+}
+
+void WzMultiWidget::initialize(std::function<void ()> closeButtonHandler)
+{
+	if (closeButtonHandler)
+	{
+		// Add the close button.
+		W_BUTINIT sButInit;
+		sButInit.id = MULTIMENU_CLOSE;
+		sButInit.pTip = _("Close");
+		sButInit.pDisplay = intDisplayImageHilight;
+		sButInit.UserData = PACKDWORD_TRI(0, IMAGE_CLOSEHILIGHT , IMAGE_CLOSE);
+		closeButton = std::make_shared<W_BUTTON>(&sButInit);
+		closeButton->addOnClickHandler([closeButtonHandler](W_BUTTON&) {
+			closeButtonHandler();
+		});
+		attach(closeButton);
+		closeButton->setCalcLayout([](WIDGET *psButton) {
+			auto psParent = psButton->parent();
+			ASSERT_OR_RETURN(, psParent != nullptr, "No parent");
+			psButton->setGeometry(psParent->width() - CLOSE_WIDTH, 0, CLOSE_WIDTH, CLOSE_HEIGHT);
+		});
+	}
+
+	multiMenuGrid = MultiMenuGrid::make();
+	panels.push_back(multiMenuGrid);
+
+	bool allowAIsForTeamStrategy = !NetPlay.bComms;
+	if (gameHasTeamStrategyView(allowAIsForTeamStrategy))
+	{
+		auto teamStrategyView = createTeamStrategyView(allowAIsForTeamStrategy);
+		if (teamStrategyView)
+		{
+			transformTeamStrategyViewMode(teamStrategyView, true);
+			teamStrategyViewSetBackgroundColor(teamStrategyView, pal_RGBA(25, 0, 110, 180));
+			teamStrategyViewWrapped = Margin(0, 10).wrap(teamStrategyView);
+			panels.push_back(teamStrategyViewWrapped);
+		}
+	}
+
+	if (teamStrategyViewWrapped)
+	{
+		// add tabs
+		panelSwitcher = std::make_shared<WzMultiMenuTabs>(0);
+		attach(panelSwitcher);
+		panelSwitcher->setButtonAlignment(MultibuttonWidget::ButtonAlignment::CENTER_ALIGN);
+		panelSwitcher->addButton(0, WzPanelTabButton::make(_("Players View")));
+		panelSwitcher->addButton(1, WzPanelTabButton::make(_("Team Strategy")));
+		panelSwitcher->choose(0);
+		panelSwitcher->addOnChooseHandler([](MultibuttonWidget& widget, int newValue){
+			// Switch actively-displayed panel
+			auto weakParent = std::weak_ptr<WIDGET>(widget.parent());
+			widgScheduleTask([newValue, weakParent](){
+				auto strongParent = std::dynamic_pointer_cast<WzMultiWidget>(weakParent.lock());
+				ASSERT_OR_RETURN(, strongParent != nullptr, "Parent doesn't exist?");
+				strongParent->switchAttachedPanel(strongParent->panels[newValue]);
+			});
+		});
+		panelSwitcher->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			auto psParent = std::dynamic_pointer_cast<WzMultiWidget>(psWidget->parent());
+			ASSERT_OR_RETURN(, psParent != nullptr, "No parent");
+			int panelSwitcherWidth = psWidget->idealWidth();
+			int panelSwitcherX0 = (psParent->width() - panelSwitcherWidth) / 2;
+			psWidget->setGeometry(panelSwitcherX0, MULTIMENUFORM_INTERNAL_PADDING, panelSwitcherWidth, MULTIMENUFORM_PANEL_TABS_HEIGHT);
+		}));
+	}
+
+	switchAttachedPanel(multiMenuGrid);
+}
+
+std::shared_ptr<IntFormAnimated> intCreateMultiMenuForm(std::function<void ()> closeButtonHandler)
+{
+	auto form = WzMultiWidget::make(true, closeButtonHandler);
+	return form;
+}
+
 bool intAddMultiMenu()
 {
 	//check for already open.
@@ -1148,28 +1454,18 @@ bool intAddMultiMenu()
 		intResetScreen(false);
 	}
 
-	auto form = std::make_shared<IntFormAnimated>();
-	form->id = MULTIMENU_FORM;
-
-	// Add the close button.
-	W_BUTINIT sButInit;
-	sButInit.id = MULTIMENU_CLOSE;
-	sButInit.pTip = _("Close");
-	sButInit.pDisplay = intDisplayImageHilight;
-	sButInit.UserData = PACKDWORD_TRI(0, IMAGE_CLOSEHILIGHT , IMAGE_CLOSE);
-	auto closeButton = std::make_shared<W_BUTTON>(&sButInit);
-	form->attach(closeButton);
-
-	auto grid = MultiMenuGrid::make();
-	form->attach(grid);
-
-	form->setCalcLayout([closeButton, grid](WIDGET *form) {
-		auto width = std::min((int32_t)screenWidth - 20, grid->idealWidth());
-		auto height = grid->idealHeight();
-		grid->setGeometry(0, 0, width, height);
-		form->setGeometry((screenWidth - width) / 2, MULTIMENU_FORM_Y, width, height);
-		closeButton->setGeometry(width - CLOSE_WIDTH, 0, CLOSE_WIDTH, CLOSE_HEIGHT);
+	auto form = intCreateMultiMenuForm([]() {
+		widgScheduleTask([]() {
+			intCloseMultiMenu();
+		});
 	});
+	form->id = MULTIMENU_FORM;
+	form->setCalcLayout([](WIDGET *form) {
+		auto width = std::min((int32_t)screenWidth - 20, form->idealWidth());
+		auto height = form->idealHeight();
+		form->setGeometry((screenWidth - width) / 2, MULTIMENU_FORM_Y, width, height);
+	});
+
 	psWScreen->psForm->attach(form);
 
 	intShowPowerBar();						// add power bar
@@ -1219,98 +1515,4 @@ bool intCloseMultiMenu()
 		intMode		= INT_NORMAL;
 	}
 	return true;
-}
-
-// ////////////////////////////////////////////////////////////////////////////
-// In Game Options house keeping stuff.
-bool intRunMultiMenu()
-{
-	return true;
-}
-
-// ////////////////////////////////////////////////////////////////////////////
-// process clicks made by user.
-void intProcessMultiMenu(UDWORD id)
-{
-	UBYTE	i;
-
-	//close
-	if (id == MULTIMENU_CLOSE)
-	{
-		intCloseMultiMenu();
-	}
-
-	//alliance button
-	if (id >= MULTIMENU_ALLIANCE_BASE  &&  id < MULTIMENU_ALLIANCE_BASE + MAX_PLAYERS  &&  selectedPlayer < MAX_PLAYERS)
-	{
-		i = (UBYTE)(id - MULTIMENU_ALLIANCE_BASE);
-
-		switch (alliances[selectedPlayer][i])
-		{
-		case ALLIANCE_BROKEN:
-			requestAlliance((UBYTE)selectedPlayer, i, true, true);			// request an alliance
-			break;
-		case ALLIANCE_INVITATION:
-			formAlliance((UBYTE)selectedPlayer, i, true, true, true);			// form an alliance
-			break;
-		case ALLIANCE_REQUESTED:
-			breakAlliance((UBYTE)selectedPlayer, i, true, true);		// break an alliance
-			break;
-
-		case ALLIANCE_FORMED:
-			breakAlliance((UBYTE)selectedPlayer, i, true, true);		// break an alliance
-			break;
-		default:
-			break;
-		}
-	}
-
-
-	//channel opens.
-	if (id >= MULTIMENU_CHANNEL &&  id < MULTIMENU_CHANNEL + MAX_CONNECTED_PLAYERS)
-	{
-		i = id - MULTIMENU_CHANNEL;
-		openchannels[i] = !openchannels[i];
-
-		if (mouseDown(MOUSE_RMB) && NetPlay.isHost) // both buttons....
-		{
-			char buf[250];
-
-			// Allow the host to kick the AI only in a MP game, or if they activated cheats in a skirmish game
-			if ((NetPlay.bComms || Cheated) && (NetPlay.players[i].allocated || (NetPlay.players[i].allocated == false && NetPlay.players[i].ai != AI_OPEN)))
-			{
-				inputLoseFocus();
-				ssprintf(buf, _("The host has kicked %s from the game!"), getPlayerName((unsigned int) i));
-				sendInGameSystemMessage(buf);
-				ssprintf(buf, _("kicked %s : %s from the game, and added them to the banned list!"), getPlayerName((unsigned int) i), NetPlay.players[i].IPtextAddress);
-				NETlogEntry(buf, SYNC_FLAG, (unsigned int) i);
-				kickPlayer((unsigned int) i, _("The host has kicked you from the game."), ERROR_KICKED);
-				return;
-			}
-		}
-	}
-
-	//radar gifts
-	if (id >=  MULTIMENU_GIFT_RAD && id < MULTIMENU_GIFT_RAD + MAX_PLAYERS)
-	{
-		sendGift(RADAR_GIFT, id - MULTIMENU_GIFT_RAD);
-	}
-
-	// research gift
-	if (id >= MULTIMENU_GIFT_RES && id < MULTIMENU_GIFT_RES  + MAX_PLAYERS)
-	{
-		sendGift(RESEARCH_GIFT, id - MULTIMENU_GIFT_RES);
-	}
-
-	//droid gift
-	if (id >=  MULTIMENU_GIFT_DRO && id <  MULTIMENU_GIFT_DRO + MAX_PLAYERS)
-	{
-		sendGift(DROID_GIFT, id - MULTIMENU_GIFT_DRO);
-	}
-
-	//power gift
-	if (id >=  MULTIMENU_GIFT_POW && id <  MULTIMENU_GIFT_POW + MAX_PLAYERS)
-	{
-		sendGift(POWER_GIFT, id - MULTIMENU_GIFT_POW);
-	}
 }

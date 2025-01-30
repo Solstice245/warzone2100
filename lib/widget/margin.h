@@ -49,11 +49,13 @@ class MarginWidget: public WIDGET
 public:
 	explicit MarginWidget(Margin margin): WIDGET(), margin(margin)
 	{
-        setTransparentToClicks(true);
+		setTransparentToMouse(true);
 	}
 
 protected:
     void geometryChanged() override;
+
+public:
     int32_t idealWidth() override;
     int32_t idealHeight() override;
 

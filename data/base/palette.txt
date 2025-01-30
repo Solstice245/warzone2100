@@ -26,7 +26,7 @@ ff,ff,ff,10	// unit select box
 ff,ff,ff,ff	// map outline ok
 ff,0,0,ff	// map outline bad
 0,80,0,ff	// keymap active
-80,0,0,ff	// keymap fixed
+55,55,55,ff	// keymap fixed
 ff,23,0,ff	// menu score loss
 37,ef,6f,ff	// menu score destroyed
 27,31,b9,ff	// menu score built
@@ -93,7 +93,7 @@ ff,00,00,ff	// demolish beam
 98,98,98,ff	// Don't know this player.
 ff,ff,f0,ff	// Seen this player before.
 b0,b0,ff,ff	// Server knows this player.
-10,10,80,80	// Default filled GUI box colour
+10,10,80,96	// Default filled GUI box colour
 1b,ff,5f,ff // Info messages text color
 10,10,80,bb	// Default notification box colour
 b0,8f,5f,ff	// Arizona fog

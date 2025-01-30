@@ -53,6 +53,17 @@
 #include <psapi.h>
 #endif
 
+// Includes for Unix
+#if defined(WZ_OS_UNIX)
+#include <unistd.h>
+#include <cstdlib>
+#endif
+
+// Includes for Emscripten
+#if defined(__EMSCRIPTEN__)
+# include "emscripten_helpers.h"
+#endif
+
 // MARK: - BuildPropertyProvider
 
 enum class BuildProperty {
@@ -160,6 +171,64 @@ static std::string Get_WinPackageFullName()
 }
 #endif
 
+enum class WZ_CONTAINER_TYPE
+{
+	NONE_DETECTED,
+	FLATPAK,
+	SNAP,
+	APPIMAGE,
+	WIN_PACKAGE		// ex. MSIX package
+};
+
+static std::string to_string(const WZ_CONTAINER_TYPE& type)
+{
+	switch (type)
+	{
+		case WZ_CONTAINER_TYPE::NONE_DETECTED:
+			return "";
+		case WZ_CONTAINER_TYPE::FLATPAK:
+			return "flatpak";
+		case WZ_CONTAINER_TYPE::SNAP:
+			return "snap";
+		case WZ_CONTAINER_TYPE::APPIMAGE:
+			return "appimage";
+		case WZ_CONTAINER_TYPE::WIN_PACKAGE:
+			return "winpackage";
+	}
+	return ""; // silence warning
+}
+
+static WZ_CONTAINER_TYPE GetCurrentContainerType()
+{
+#if defined(WZ_OS_WIN)
+	if (!Get_WinPackageFullName().empty())
+	{
+		return WZ_CONTAINER_TYPE::WIN_PACKAGE;
+	}
+#elif defined(WZ_OS_UNIX)
+	if (access("/.flatpak-info", F_OK) == 0)
+	{
+		return WZ_CONTAINER_TYPE::FLATPAK;
+	}
+	// Check multiple variables, as is done by both WebKit and SDL
+	// See: https://snapcraft.io/docs/environment-variables
+	if (std::getenv("SNAP") && std::getenv("SNAP_NAME") && std::getenv("SNAP_REVISION"))
+	{
+		return WZ_CONTAINER_TYPE::SNAP;
+	}
+	if (std::getenv("APPIMAGE"))
+	{
+		return WZ_CONTAINER_TYPE::APPIMAGE;
+	}
+#endif
+	return WZ_CONTAINER_TYPE::NONE_DETECTED;
+}
+
+static std::string GetCurrentContainerTypeStr()
+{
+	return to_string(GetCurrentContainerType());
+}
+
 static std::string GetCurrentBuildPropertyValue(const BuildProperty& property)
 {
 	using BP = BuildProperty;
@@ -248,7 +317,14 @@ static const std::unordered_map<std::string, EnvironmentPropertyProvider::Enviro
 	{"INSTALLED_PATH", EnvironmentPropertyProvider::EnvironmentProperty::INSTALLED_PATH},
 	{"WIN_INSTALLED_BINARIES", EnvironmentPropertyProvider::EnvironmentProperty::WIN_INSTALLED_BINARIES},
 	{"WIN_LOADEDMODULES", EnvironmentPropertyProvider::EnvironmentProperty::WIN_LOADEDMODULES},
-	{"WIN_LOADEDMODULENAMES", EnvironmentPropertyProvider::EnvironmentProperty::WIN_LOADEDMODULENAMES}
+	{"WIN_LOADEDMODULENAMES", EnvironmentPropertyProvider::EnvironmentProperty::WIN_LOADEDMODULENAMES},
+	// WZ 4.3.3+
+	{"ENV_VAR_NAMES", EnvironmentPropertyProvider::EnvironmentProperty::ENV_VAR_NAMES},
+	{"SYSTEM_RAM", EnvironmentPropertyProvider::EnvironmentProperty::SYSTEM_RAM},
+	// WZ 4.4.0+
+	{"CONTAINER_TYPE", EnvironmentPropertyProvider::EnvironmentProperty::CONTAINER_TYPE},
+	// WZ 4.5.0+
+	{"EMSCRIPTEN_WINDOW_URL", EnvironmentPropertyProvider::EnvironmentProperty::EMSCRIPTEN_WINDOW_URL}
 };
 
 #if defined(WZ_OS_WIN)
@@ -393,6 +469,99 @@ static std::vector<std::string> Get_WinProcessModules(bool filenamesOnly = false
 }
 #endif // defined(WZ_OS_WIN)
 
+#if defined(WZ_OS_WIN)
+
+std::unordered_map<std::string, std::string> GetEnvironmentVariables()
+{
+	std::unordered_map<std::string, std::string> results;
+	auto free_envStringsW = [](wchar_t* p) { if (p) { FreeEnvironmentStringsW(p); } };
+	auto envStringsW = std::unique_ptr<wchar_t, decltype(free_envStringsW)>{GetEnvironmentStringsW(), free_envStringsW};
+	if (!envStringsW)
+	{
+		return {};
+	}
+	std::vector<char> u8_buffer(WIN_MAX_EXTENDED_PATH, 0);
+	const wchar_t* pEnvStart = envStringsW.get();
+	while (*pEnvStart != '\0')
+	{
+		size_t envEntryLen = wcslen(pEnvStart);
+		// convert UTF-16 to UTF-8
+		if (win_Utf16toUtf8(pEnvStart, u8_buffer))
+		{
+			const char* pEnvStr = u8_buffer.data();
+			const char* separatorPos = strchr(pEnvStr, '=');
+			if (separatorPos)
+			{
+				std::string envVarName = std::string(pEnvStr, separatorPos - pEnvStr);
+				std::string envVarValue = std::string(++separatorPos);
+				if (!envVarName.empty())
+				{
+					results[envVarName] = envVarValue;
+				}
+			}
+		}
+		pEnvStart += envEntryLen + 1;
+	}
+	return results;
+}
+
+#elif defined(WZ_OS_UNIX)
+
+# include <unistd.h>
+# if !defined(HAVE_ENVIRON_DECL)
+  extern char **environ;
+# endif
+
+std::unordered_map<std::string, std::string> GetEnvironmentVariables()
+{
+	std::unordered_map<std::string, std::string> results;
+	if (!environ)
+	{
+		return {};
+	}
+	for (char ** env = environ; *env; ++env)
+	{
+		const char* separatorPos = strchr(*env, '=');
+		if (!separatorPos) { continue; }
+		std::string envVarName = std::string(*env, separatorPos - *env);
+		std::string envVarValue = std::string(++separatorPos);
+		if (envVarName.empty()) { continue; }
+		results[envVarName] = envVarValue;
+	}
+	return results;
+}
+
+#else
+
+std::unordered_map<std::string, std::string> GetEnvironmentVariables()
+{
+	// not implemented
+	return {};
+}
+
+#endif
+
+
+std::string GetEnvironmentVariableNames()
+{
+	auto envVariables = GetEnvironmentVariables();
+	const std::string separator = "="; // "=" should not occur in an env var name on Windows, Linux, etc
+	std::string result;
+	for (const auto& it : envVariables)
+	{
+		if (it.first.empty())
+		{
+			continue;
+		}
+		if (!result.empty())
+		{
+			result += separator;
+		}
+		result += it.first;
+	}
+	return result;
+}
+
 std::string EnvironmentPropertyProvider::GetCurrentEnvironmentPropertyValue(const EnvironmentProperty& property)
 {
 	using EP = EnvironmentProperty;
@@ -463,6 +632,18 @@ std::string EnvironmentPropertyProvider::GetCurrentEnvironmentPropertyValue(cons
 #endif
 			return processModuleNamesStr;
 		}
+		case EP::ENV_VAR_NAMES:
+			return GetEnvironmentVariableNames();
+		case EP::SYSTEM_RAM:
+			return std::to_string(wzGetCurrentSystemRAM());
+		case EP::CONTAINER_TYPE:
+			return GetCurrentContainerTypeStr();
+		case EP::EMSCRIPTEN_WINDOW_URL:
+#if defined(__EMSCRIPTEN__)
+			return WZ_GetEmscriptenWindowLocationURL();
+#else
+			return "";
+#endif
 	}
 	return ""; // silence warning
 }

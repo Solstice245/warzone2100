@@ -30,5 +30,7 @@
 void sdlInitCursors();
 void sdlInitColoredCursors();
 void sdlFreeCursors();
+void wzSDLReinitCursors();
+void wzQueueRefreshCursor();
 
 #endif // __INCLUDED_LIB_SDL_CURSORS_SDL_H__

@@ -44,10 +44,8 @@
  *	Global Variables
  */
 
-static gfx_api::gfxFloat shaderStretch = 0;
 gfx_api::buffer* pie_internal::rectBuffer = nullptr;
 static RENDER_STATE rendStates;
-static int32_t ecmState = 0;
 static gfx_api::gfxFloat timeState = 0.0f;
 
 const Vector3f defaultSunPosition(225.0f, -600.0f, 450.0f);
@@ -121,9 +119,25 @@ void pie_FreeShaders()
 //static float fogEnd;
 
 // Run from screen.c on init.
-bool pie_LoadShaders()
+bool pie_LoadShaders(uint32_t shadowFilterSize, bool pointLightEnabled)
 {
 	// note: actual loading of shaders now occurs in gfx_api
+
+	// initialize gfx context shadow constants (must happen after context is initialized)
+	ASSERT(gfx_api::context::isInitialized(), "gfx context isn't initialized?");
+	auto shadowConstants = gfx_api::context::get().getShadowConstants();
+	shadowConstants.shadowFilterSize = shadowFilterSize;
+	shadowConstants.isPointLightPerPixelEnabled = pointLightEnabled;
+	gfx_api::context::get().setShadowConstants(shadowConstants);
+
+	if (!pie_supportsShadowMapping().value_or(false))
+	{
+		pie_setShadowMode(ShadowMode::Fallback_Stencil_Shadows);
+	}
+	else
+	{
+		pie_setShadowMode(ShadowMode::Shadow_Mapping);
+	}
 
 	gfx_api::gfxUByte rect[] {
 		0, 255, 0, 255,
@@ -132,7 +146,7 @@ bool pie_LoadShaders()
 		255, 0, 0, 255
 	};
 	if (!pie_internal::rectBuffer)
-		pie_internal::rectBuffer = gfx_api::context::get().create_buffer_object(gfx_api::buffer::usage::vertex_buffer);
+		pie_internal::rectBuffer = gfx_api::context::get().create_buffer_object(gfx_api::buffer::usage::vertex_buffer, gfx_api::context::buffer_storage_hint::static_draw, "rectBuffer");
 	pie_internal::rectBuffer->upload(16 * sizeof(gfx_api::gfxUByte), rect);
 
 	return true;
@@ -151,26 +165,6 @@ void pie_SetShaderTime(uint32_t shaderTime)
 float pie_GetShaderTime()
 {
 	return timeState;
-}
-
-void pie_SetShaderEcmEffect(bool value)
-{
-	ecmState = (int)value;
-}
-
-int pie_GetShaderEcmEffect()
-{
-	return ecmState;
-}
-
-void pie_SetShaderStretchDepth(float stretch)
-{
-	shaderStretch = stretch;
-}
-
-float pie_GetShaderStretchDepth()
-{
-	return shaderStretch;
 }
 
 /// Set the OpenGL fog start and end

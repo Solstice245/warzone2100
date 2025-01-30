@@ -28,6 +28,9 @@
 #include "cursors_sdl.h"
 #include <SDL_mouse.h>
 #include <SDL_surface.h>
+#include <SDL_hints.h>
+#include "sdl_backend_private.h"
+#include "cursor_sdl_helpers.h"
 
 static CURSOR currentCursor = CURSOR_MAX;
 static CURSOR lastAppliedCursor = CURSOR_MAX;
@@ -1260,24 +1263,45 @@ static const struct
 	{ cursor_select,        CURSOR_SELECT },
 };
 
-/**
-	init_system_ColorCursor()-- Create a colored mouse cursor image
- */
-SDL_Cursor *init_system_ColorCursor(CURSOR cur, const char *fileName)
+static void scaleCursorImageForUpload(iV_Image& cursorImage, int& hot_x, int& hot_y)
 {
+	unsigned int horizontalScalePercentage;
+	unsigned int verticalScalePercentage;
+	horizontalScalePercentage = verticalScalePercentage = war_getCursorScale();
 
-	iV_Image *psSprite = (iV_Image *)malloc(sizeof(iV_Image));
-	if (!psSprite)
+#if defined(WZ_OS_WIN)
+	if (SDL_GetHintBoolean(SDL_HINT_WINDOWS_DPI_SCALING, SDL_FALSE) == SDL_TRUE)
 	{
-		debug(LOG_FATAL, "Could not allocate memory for cursor sprite. Exiting.");
-		exit(-1);
+		// Must manually scale the cursor image based on the window scale factor (in Windows w/ SDL 2.24.0+)
+		float horizWindowScaleFactor = 0.f, vertWindowScaleFactor = 0.f;
+		wzGetWindowToRendererScaleFactor(&horizWindowScaleFactor, &vertWindowScaleFactor);
+		assert(horizWindowScaleFactor != 0.f);
+		assert(vertWindowScaleFactor != 0.f);
+		horizontalScalePercentage = static_cast<unsigned int>(horizontalScalePercentage * horizWindowScaleFactor);
+		verticalScalePercentage = static_cast<unsigned int>(verticalScalePercentage * vertWindowScaleFactor);
 	}
+#endif
 
-	if (!iV_loadImage_PNG(fileName, psSprite))
+	if (horizontalScalePercentage == 100 && verticalScalePercentage == 100)
 	{
-		debug(LOG_FATAL, "Could not load cursor sprite. Exiting.");
-		exit(-1);
+		return;
 	}
+	float horizontalScaleFactor = horizontalScalePercentage / 100.f;
+	float verticalScaleFactor = verticalScalePercentage / 100.f;
+	unsigned int scaledWidth = static_cast<unsigned int>(cursorImage.width() * horizontalScaleFactor);
+	unsigned int scaledHeight = static_cast<unsigned int>(cursorImage.height() * verticalScaleFactor);
+	if (scaledWidth > cursorImage.width() && scaledHeight > cursorImage.height())
+	{
+		debug(LOG_GUI, "Scaling cursor image from (%u x %u) to (%u x %u)", cursorImage.width(), cursorImage.height(), scaledWidth, scaledHeight);
+		cursorImage.resize(scaledWidth, scaledHeight);
+		hot_x = static_cast<int>(hot_x * horizontalScaleFactor);
+		hot_y = static_cast<int>(hot_y * verticalScaleFactor);
+	}
+}
+
+SDL_Cursor* init_cursor_from_image(iV_Image&& sprite, int hot_x, int hot_y)
+{
+	scaleCursorImageForUpload(sprite, hot_x, hot_y);
 
 #if SDL_BYTEORDER == SDL_BIG_ENDIAN
 	uint32_t rmask = 0xff000000;
@@ -1291,13 +1315,13 @@ SDL_Cursor *init_system_ColorCursor(CURSOR cur, const char *fileName)
 	uint32_t amask = 0xff000000;
 #endif
 
-	SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(psSprite->bmp, psSprite->width, psSprite->height, psSprite->depth * 8, psSprite->width * 4, rmask, gmask, bmask, amask);
+	SDL_Surface *surface = SDL_CreateRGBSurfaceFrom(sprite.bmp_w(), sprite.width(), sprite.height(), sprite.depth(), sprite.width() * 4, rmask, gmask, bmask, amask);
 	if (!surface)
 	{
 		debug(LOG_FATAL, "Failed to create cursor because: %s", SDL_GetError());
 		return nullptr;
 	}
-	SDL_Cursor *pointer = SDL_CreateColorCursor(surface, psSprite->width / 2, psSprite->height / 2);	// We center the hotspot for all (FIXME ?)
+	SDL_Cursor *pointer = SDL_CreateColorCursor(surface, hot_x, hot_y);
 	if (!pointer)
 	{
 		debug(LOG_FATAL, "Could not create cursor because %s", SDL_GetError());
@@ -1306,10 +1330,28 @@ SDL_Cursor *init_system_ColorCursor(CURSOR cur, const char *fileName)
 
 	// free up surface & image data
 	SDL_FreeSurface(surface);
-	free(psSprite->bmp);
-	free(psSprite);
+	sprite.clear();
 
 	return pointer;
+}
+
+/**
+	init_system_ColorCursor()-- Create a colored mouse cursor image
+ */
+SDL_Cursor *init_system_ColorCursor(CURSOR cur, const char *fileName)
+{
+	iV_Image sprite;
+	if (!iV_loadImage_PNG2(fileName, sprite, true))
+	{
+		debug(LOG_FATAL, "Could not load cursor sprite. Exiting.");
+		exit(-1);
+	}
+
+	// We center the hotspot for all (FIXME ?)
+	int hot_x = sprite.width() / 2;
+	int hot_y = sprite.height() / 2;
+
+	return init_cursor_from_image(std::move(sprite), hot_x, hot_y);
 }
 
 /**
@@ -1359,7 +1401,15 @@ SDL_Cursor *init_system_cursor32(CURSOR cur)
 	}
 
 	sscanf(image[4 + row], "%d,%d", &hot_x, &hot_y);
-	return SDL_CreateCursor(data, mask, 32, 32, hot_x, hot_y);
+
+	iV_Image cursorImage;
+	if (!ivImageFromMonoCursorDataSDLCompat(data, mask, 32, 32, cursorImage))
+	{
+		debug(LOG_FATAL, "Failed to convert data to cursor!");
+		abort();
+	}
+
+	return init_cursor_from_image(std::move(cursorImage), hot_x, hot_y);
 }
 
 /**
@@ -1368,8 +1418,20 @@ SDL_Cursor *init_system_cursor32(CURSOR cur)
 void wzSetCursor(CURSOR cur)
 {
 	ASSERT(cur < CURSOR_MAX, "Specified cursor(%d) is over our limit of (%d)!", (int)cur, (int)CURSOR_MAX);
-	
+
 	currentCursor = cur;
+}
+
+void wzSDLReinitCursors()
+{
+	sdlFreeCursors();
+	war_GetColouredCursor() ? sdlInitColoredCursors() : sdlInitCursors();
+	SDL_SetCursor(aCursors[currentCursor]);
+}
+
+void wzQueueRefreshCursor()
+{
+	lastAppliedCursor = CURSOR_MAX;
 }
 
 void wzApplyCursor()
@@ -1379,9 +1441,7 @@ void wzApplyCursor()
 	// If mouse cursor options change, change cursors (used to only work on mouse options screen for some reason)
 	if (!(war_GetColouredCursor() ^ monoCursor))
 	{
-		sdlFreeCursors();
-		war_GetColouredCursor() ? sdlInitColoredCursors() : sdlInitCursors();
-		SDL_SetCursor(aCursors[currentCursor]);
+		wzSDLReinitCursors();
 		lastAppliedCursor = currentCursor;
 		return;
 	}
@@ -1472,6 +1532,7 @@ void sdlInitCursors()
 
 void sdlFreeCursors()
 {
+	SDL_SetCursor(SDL_GetDefaultCursor());
 	unsigned int i;
 	for (i = 0 ; i < ARRAY_SIZE(aCursors); ++i)
 	{

@@ -34,17 +34,6 @@
 #include "display.h"
 #include "ai.h"
 
-#define ARIZONA 1
-#define URBAN 2
-#define ROCKIE 3
-
-enum MAP_TILESET_TYPE
-{
-	TILESET_ARIZONA = 0,
-	TILESET_URBAN = 1,
-	TILESET_ROCKIES = 2
-};
-
 #define TALLOBJECT_YMAX		(200)
 #define TALLOBJECT_ADJUST	(300)
 
@@ -56,8 +45,12 @@ enum MAP_TILESET_TYPE
 
 struct GROUND_TYPE
 {
-	const char *textureName;
+	std::string textureName;
 	float textureSize;
+	std::string normalMapTextureName = "";
+	std::string specularMapTextureName = "";
+	std::string heightMapTextureName = "";
+	bool highQualityTextures = false; // whether this ground_type has normal / specular / height maps
 };
 
 /* Information stored with each tile */
@@ -66,31 +59,38 @@ struct MAPTILE
 	uint8_t         tileInfoBits;
 	PlayerMask      tileExploredBits;
 	PlayerMask      sensorBits;             ///< bit per player, who can see tile with sensor
-	uint8_t         illumination;           // How bright is this tile?
 	uint8_t         watchers[MAX_PLAYERS];  // player sees through fog of war here with this many objects
 	uint16_t        texture;                // Which graphics texture is on this tile
 	int32_t         height;                 ///< The height at the top left of the tile
-	float           level;                  ///< The visibility level of the top left of the tile, for this client.
 	BASE_OBJECT *   psObject;               // Any object sitting on the location (e.g. building)
-	PIELIGHT        colour;
 	uint16_t        limitedContinent;       ///< For land or sea limited propulsion types
 	uint16_t        hoverContinent;         ///< For hover type propulsions
-	uint8_t         ground;                 ///< The ground type used for the terrain renderer
 	uint16_t        fireEndTime;            ///< The (uint16_t)(gameTime / GAME_TICKS_PER_UPDATE) that BITS_ON_FIRE should be cleared.
 	int32_t         waterLevel;             ///< At what height is the water for this tile
 	PlayerMask      jammerBits;             ///< bit per player, who is jamming tile
 	uint8_t         sensors[MAX_PLAYERS];   ///< player sees this tile with this many radar sensors
 	uint8_t         jammers[MAX_PLAYERS];   ///< player jams the tile with this many objects
+
+	// DISPLAY ONLY (NOT for use in game calculations)
+	uint8_t         ground;                 ///< The ground type used for the terrain renderer
+	uint8_t         illumination;           // How bright is this tile? = diffuseSunLight * ambientOcclusion
+	uint8_t			ambientOcclusion;		// ambient occlusion. from 1 (max occlusion) to 254 (no occlusion), similar to illumination.
+	float           level;                  ///< The visibility level of the top left of the tile, for this client. for terrain lightmap
 };
 
 /* The size and contents of the map */
 extern SDWORD	mapWidth, mapHeight;
 
+
+
 extern std::unique_ptr<MAPTILE[]> psMapTiles;
 extern float waterLevel;
-extern std::unique_ptr<GROUND_TYPE[]> psGroundTypes;
-extern int numGroundTypes;
 extern char *tilesetDir;
+extern MAP_TILESET currentMapTileset;
+
+const GROUND_TYPE& getGroundType(size_t idx);
+size_t getNumGroundTypes();
+#define MAX_GROUND_TYPES 12
 
 #define AIR_BLOCKED		0x01	///< Aircraft cannot pass tile
 #define FEATURE_BLOCKED		0x02	///< Ground units cannot pass tile due to item in the way
@@ -173,7 +173,7 @@ WZ_DECL_ALWAYS_INLINE static inline void auxSetAllied(int x, int y, int player, 
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
-		if (alliancebits[player] & (1 << i))
+		if (aiCheckAlliances(player, i))
 		{
 			psAuxMap[i][x + y * mapWidth] |= state;
 		}
@@ -187,7 +187,7 @@ WZ_DECL_ALWAYS_INLINE static inline void auxSetEnemy(int x, int y, int player, i
 
 	for (i = 0; i < MAX_PLAYERS; i++)
 	{
-		if (!(alliancebits[player] & (1 << i)))
+		if (!aiCheckAlliances(player, i))
 		{
 			psAuxMap[i][x + y * mapWidth] |= state;
 		}
@@ -255,10 +255,27 @@ static inline bool TileHasFeature(const MAPTILE *tile)
 /** Check if tile contains a wall structure. Function is NOT thread-safe. */
 static inline bool TileHasWall(const MAPTILE *tile)
 {
+	const auto *psStruct = (STRUCTURE *)tile->psObject;
 	return TileHasStructure(tile)
-	       && (((STRUCTURE *)tile->psObject)->pStructureType->type == REF_WALL
-	           || ((STRUCTURE *)tile->psObject)->pStructureType->type == REF_GATE
-	           || ((STRUCTURE *)tile->psObject)->pStructureType->type == REF_WALLCORNER);
+	       && (psStruct->pStructureType->type == REF_WALL
+	           || psStruct->pStructureType->type == REF_GATE
+	           || psStruct->pStructureType->type == REF_WALLCORNER);
+}
+
+/** Check if tile contains a wall structure. Function is NOT thread-safe.
+ * This function is specifically for raycast callback, because "TileHasWall" is used
+ * to decide wether or not it's possible to place a new defense structure on top of a wall.
+ * We do not want to allow place more defense structures on top of already existing ones.
+*/
+static inline bool TileHasWall_raycast(const MAPTILE *tile)
+{
+	const auto *psStruct = (STRUCTURE *)tile->psObject;
+	return TileHasStructure(tile)
+	       && (psStruct->pStructureType->type == REF_WALL
+	           || psStruct->pStructureType->type == REF_GATE
+	           // hadrcrete towers are technically a WALL + weapon, so count them as walls too
+	           || psStruct->pStructureType->combinesWithWall
+	           || psStruct->pStructureType->type == REF_WALLCORNER);
 }
 
 /** Check if tile is burning. */
@@ -335,11 +352,6 @@ static inline unsigned char terrainType(const MAPTILE *tile)
 }
 
 
-
-/* The size and contents of the map */
-extern SDWORD	mapWidth, mapHeight;
-extern int numGroundTypes;
-
 /* Additional tile <-> world coordinate overloads */
 
 static inline Vector2i world_coord(Vector2i const &mapCoord)
@@ -381,12 +393,27 @@ bool mapLoad(char const *filename);
 struct ScriptMapData;
 bool mapLoadFromWzMapData(std::shared_ptr<WzMap::MapData> mapData);
 
+// used to reload decal + ground types types when switching terrain overrides
+bool mapReloadGroundTypes();
+
 class WzMapPhysFSIO : public WzMap::IOProvider
 {
 public:
+	WzMapPhysFSIO() { }
+	WzMapPhysFSIO(const std::string& baseMountPath)
+	: m_basePath(baseMountPath)
+	{ }
+public:
 	virtual std::unique_ptr<WzMap::BinaryIOStream> openBinaryStream(const std::string& filename, WzMap::BinaryIOStream::OpenMode mode) override;
-	virtual bool loadFullFile(const std::string& filename, std::vector<char>& fileData) override;
+	virtual bool loadFullFile(const std::string& filename, std::vector<char>& fileData, bool appendNullCharacter = false) override;
 	virtual bool writeFullFile(const std::string& filename, const char *ppFileData, uint32_t fileSize) override;
+	virtual bool makeDirectory(const std::string& directoryPath) override;
+	virtual const char* pathSeparator() const override;
+
+	virtual bool enumerateFiles(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc) override;
+	virtual bool enumerateFolders(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc) override;
+private:
+	std::string m_basePath;
 };
 
 class WzMapDebugLogger : public WzMap::LoggingProtocol
@@ -497,6 +524,13 @@ WZ_DECL_ALWAYS_INLINE static inline bool worldOnMap(Vector2i pos)
 	return worldOnMap(pos.x, pos.y);
 }
 
+static inline void makeTileRubbleTexture(MAPTILE *psTile, const unsigned int x, const unsigned int y, const unsigned int newTexture)
+{
+	psTile->texture = TileNumber_texture(psTile->texture) | newTexture;
+	SET_TILE_DECAL(psTile);
+	markTileDirty(x, y);
+}
+
 
 /* Intersect a line with the map and report tile intersection points */
 bool map_Intersect(int *Cx, int *Cy, int *Vx, int *Vy, int *Sx, int *Sy);
@@ -549,7 +583,11 @@ WZ_DECL_ALWAYS_INLINE static inline bool hasSensorOnTile(MAPTILE *psTile, unsign
 void mapInit();
 void mapUpdate();
 
+bool shouldLoadTerrainTypeOverrides(const std::string& name);
+bool loadTerrainTypeMapOverride(MAP_TILESET tileSet);
+
 //For saves to determine if loading the terrain type override should occur
 extern bool builtInMap;
+extern bool useTerrainOverrides;
 
 #endif // __INCLUDED_SRC_MAP_H__

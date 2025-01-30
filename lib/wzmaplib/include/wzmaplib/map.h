@@ -24,8 +24,9 @@
 #include <vector>
 #include <memory>
 #include <unordered_map>
+#include <unordered_set>
 
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -34,6 +35,7 @@ using nonstd::nullopt;
 #include "map_io.h"
 #include "terrain_type.h"
 #include "map_terrain_types.h"
+#include "map_stats.h"
 
 // MARK: - Various defines needed by both maplib and the game's map-handling code
 
@@ -46,6 +48,9 @@ using nonstd::nullopt;
 
 #define TILE_MAX_HEIGHT	(255 * ELEVATION_SCALE)
 #define TILE_MIN_HEIGHT	0
+
+// The player number for scavengers (as loaded by this library)
+constexpr int8_t PLAYER_SCAVENGERS = -1;
 
 /* Flags for whether texture tiles are flipped in X and Y or rotated */
 #define TILE_XFLIP		0x8000
@@ -118,30 +123,25 @@ bool writeMapData(const MapData& map, const std::string &filename, IOProvider& m
 
 // MARK: - High-level interface for loading a map
 
-enum class MapType
-{
-	CAMPAIGN,
-	SAVEGAME,
-	SKIRMISH
-};
+std::string to_string(MapType mapType);
 
 class Map
 {
 private:
-	Map(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, std::unique_ptr<LoggingProtocol> logger, std::unique_ptr<IOProvider> mapIO = std::unique_ptr<IOProvider>(new StdIOProvider()));
+	Map(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, std::shared_ptr<LoggingProtocol> logger, std::shared_ptr<IOProvider> mapIO = std::make_shared<StdIOProvider>());
 
 public:
 	// Construct an empty Map, for modification
 	Map();
 
 	// Load a map from a specified folder path + mapType + maxPlayers + random seed (only used for script-generated maps), optionally supplying:
-	// - previewOnly (set to true to shortcut processing of map details that don't factor into preview generation)
+	// - seed (a seed used for random script-based maps generation)
 	// - a logger
 	// - a WzMap::IOProvider
-	static std::unique_ptr<Map> loadFromPath(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, uint32_t seed, bool previewOnly = false, std::unique_ptr<LoggingProtocol> logger = nullptr, std::unique_ptr<IOProvider> mapIO = std::unique_ptr<IOProvider>(new StdIOProvider()));
+	static std::shared_ptr<Map> loadFromPath(const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, uint32_t seed, std::shared_ptr<LoggingProtocol> logger = nullptr, std::shared_ptr<IOProvider> mapIO = std::make_shared<StdIOProvider>());
 
 	// Export a map to a specified folder path in a specified output format (version)
-	static bool exportMapToPath(Map& map, const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, OutputFormat format, std::unique_ptr<LoggingProtocol> logger = nullptr, std::unique_ptr<IOProvider> mapIO = std::unique_ptr<IOProvider>(new StdIOProvider()));
+	static bool exportMapToPath(Map& map, const std::string& mapFolderPath, MapType mapType, uint32_t mapMaxPlayers, OutputFormat format, std::shared_ptr<LoggingProtocol> logger = nullptr, std::shared_ptr<IOProvider> mapIO = std::make_shared<StdIOProvider>());
 
 	// High-level data loading functions
 
@@ -183,17 +183,34 @@ public:
 	// Returns nullopt if loading the map data failed, the format can't be determined, or if this WzMap instance was not created by loading a map
 	optional<LoadedFormat> loadedMapFormat();
 
+	// Obtain the script from a loaded script-generated map
+	const std::vector<char>* scriptMapContents() const { return m_mapScriptContents.get(); }
+
+	// Returns a new Map instance, from an existing script-generated map instance, generated using a new seed
+	// Fails if:
+	//	- The current Map is not a script-generated map (wasScriptGenerated() == false)
+	std::shared_ptr<Map> generateFromExistingScriptMap(uint32_t seed, std::shared_ptr<LoggingProtocol> logger = nullptr);
+
 	// Other Map instance data
 	bool wasScriptGenerated() const { return m_wasScriptGenerated; }
+	optional<uint32_t> scriptGeneratedMapSeed() const;
 	const std::string& mapFolderPath() const { return m_mapFolderPath; }
+
+	// Getting a list of expected file names for a particular map format
+	static std::unordered_set<std::string> expectedFileNames(optional<LoadedFormat> format = nullopt);
+
+	// Extract various map stats / info
+	optional<MapStats> calculateMapStats(uint32_t mapMaxPlayers, MapStatsConfiguration statsConfig = MapStatsConfiguration());
 
 private:
 	std::string m_mapFolderPath;
 	MapType m_mapType;
 	uint32_t m_mapMaxPlayers = 8;
-	std::unique_ptr<LoggingProtocol> m_logger;
-	std::unique_ptr<WzMap::IOProvider> m_mapIO;
+	std::shared_ptr<LoggingProtocol> m_logger;
+	std::shared_ptr<WzMap::IOProvider> m_mapIO;
+	uint32_t m_scriptGeneratedMapSeed = 0;
 	bool m_wasScriptGenerated = false;
+	std::shared_ptr<std::vector<char>> m_mapScriptContents;
 	std::shared_ptr<MapData> m_mapData;
 	std::shared_ptr<std::vector<Structure>> m_structures;
 	std::shared_ptr<std::vector<Droid>> m_droids;

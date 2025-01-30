@@ -29,7 +29,7 @@
 #include "structure.h"
 #include <map>
 #include <unordered_set>
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -37,11 +37,14 @@ using nonstd::nullopt;
 
 struct FACTION {
 	WzString name;
-	std::map<WzString, WzString> replaceIMD;
+	typedef std::map<WzString, WzString> ReplaceIMDMap;
+	ReplaceIMDMap replaceIMD;
 };
 
+void reinitFactionsMapping();
+
 optional<WzString> getFactionModelName(const FactionID faction, const WzString& normalFactionName);
-iIMDShape* getFactionIMD(const FACTION *faction, iIMDShape* imd);
+iIMDShape* getFactionDisplayIMD(const FACTION *faction, iIMDShape* imd); // DISPLAY ONLY
 
 const FACTION* getPlayerFaction(uint8_t player);
 const FACTION* getFactionByID(FactionID faction);

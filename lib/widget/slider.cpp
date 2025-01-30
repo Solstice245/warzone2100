@@ -97,7 +97,7 @@ UDWORD widgGetSliderPos(const std::shared_ptr<W_SCREEN> &psScreen, UDWORD id)
 /* Run a slider widget */
 void W_SLIDER::run(W_CONTEXT *psContext)
 {
-	if ((state & SLD_DRAG) && !mouseDown(MOUSE_LMB))
+	if ((state & SLD_DRAG) && !isHandlingDrag)
 	{
 		state &= ~SLD_DRAG;
 		if (auto lockedScreen = screenPointer.lock())
@@ -106,103 +106,22 @@ void W_SLIDER::run(W_CONTEXT *psContext)
 		}
 		dirty = true;
 	}
-	else if (!(state & SLD_DRAG) && mouseDown(MOUSE_LMB))
-	{
-		clicked(psContext, WKEY_NONE);
-	}
-	if (state & SLD_DRAG)
-	{
-		/* Figure out where the drag box should be */
-		int mx = psContext->mx - x();
-		int my = psContext->my - y();
-		int stopSize;
-		switch (orientation)
-		{
-		case WSLD_LEFT:
-			if (mx <= barSize / 2)
-			{
-				pos = 0;
-			}
-			else if (mx >= width() - barSize / 2)
-			{
-				pos = numStops;
-			}
-			else
-			{
-				/* Mouse is in the middle of the slider, calculate which stop */
-				stopSize = (width() - barSize) / std::max<int>(numStops, 1);
-				pos = (mx + stopSize / 2 - barSize / 2)
-				      * numStops
-				      / std::max<int>((width() - barSize), 1);
-			}
-			break;
-		case WSLD_RIGHT:
-			if (mx <= barSize / 2)
-			{
-				pos = numStops;
-			}
-			else if (mx >= width() - barSize / 2)
-			{
-				pos = 0;
-			}
-			else
-			{
-				/* Mouse is in the middle of the slider, calculate which stop */
-				stopSize = (width() - barSize) / std::max<int>(numStops, 1);
-				pos = numStops
-				      - (mx + stopSize / 2 - barSize / 2)
-				      * numStops
-				      / std::max<int>((width() - barSize), 1);
-			}
-			break;
-		case WSLD_TOP:
-			if (my <= barSize / 2)
-			{
-				pos = 0;
-			}
-			else if (my >= height() - barSize / 2)
-			{
-				pos = numStops;
-			}
-			else
-			{
-				/* Mouse is in the middle of the slider, calculate which stop */
-				stopSize = (height() - barSize) / std::max<int>(numStops, 1);
-				pos = (my + stopSize / 2 - barSize / 2)
-				      * numStops
-				      / std::max<int>((height() - barSize), 1);
-			}
-			break;
-		case WSLD_BOTTOM:
-			if (my <= barSize / 2)
-			{
-				pos = numStops;
-			}
-			else if (my >= height() - barSize / 2)
-			{
-				pos = 0;
-			}
-			else
-			{
-				/* Mouse is in the middle of the slider, calculate which stop */
-				stopSize = (height() - barSize) / std::max<int>(numStops, 1);
-				pos = numStops
-				      - (my + stopSize / 2 - barSize / 2)
-				      * numStops
-				      / std::max<int>((height() - barSize), 1);
-			}
-			break;
-		}
-	}
 }
 
 void W_SLIDER::clicked(W_CONTEXT *psContext, WIDGET_KEY)
 {
-	if (isEnabled() && DragEnabled && geometry().contains(psContext->mx, psContext->my))
+	if (isEnabled() && DragEnabled)
 	{
 		dirty = true;
 		state |= SLD_DRAG;
+		isHandlingDrag = true;
+		updateSliderFromMousePosition(psContext);
 	}
+}
+
+void W_SLIDER::released(W_CONTEXT *psContext, WIDGET_KEY)
+{
+	isHandlingDrag = false;
 }
 
 void W_SLIDER::highlight(W_CONTEXT *)
@@ -222,6 +141,11 @@ void W_SLIDER::highlightLost()
 void W_SLIDER::setTip(std::string string)
 {
 	pTip = string;
+}
+
+void W_SLIDER::setHelp(optional<WidgetHelp> _help)
+{
+	help = _help;
 }
 
 void W_SLIDER::display(int xOffset, int yOffset)
@@ -247,4 +171,110 @@ bool W_SLIDER::isHighlighted() const
 bool W_SLIDER::isEnabled() const
 {
 	return (state & SLD_DISABLED) == 0;
+}
+
+std::string W_SLIDER::getTip()
+{
+	return pTip;
+}
+
+WidgetHelp const * W_SLIDER::getHelp() const
+{
+	if (!help.has_value()) { return nullptr; }
+	return &(help.value());
+}
+
+bool W_SLIDER::capturesMouseDrag(WIDGET_KEY)
+{
+	return true;
+}
+
+void W_SLIDER::mouseDragged(WIDGET_KEY, W_CONTEXT *, W_CONTEXT *psContext)
+{
+	updateSliderFromMousePosition(psContext);
+}
+
+void W_SLIDER::updateSliderFromMousePosition(W_CONTEXT* psContext)
+{
+	/* Figure out where the drag box should be */
+	int mx = psContext->mx - x();
+	int my = psContext->my - y();
+	int stopSize;
+	switch (orientation)
+	{
+	case WSLD_LEFT:
+		if (mx <= barSize / 2)
+		{
+			pos = 0;
+		}
+		else if (mx >= width() - barSize / 2)
+		{
+			pos = numStops;
+		}
+		else
+		{
+			/* Mouse is in the middle of the slider, calculate which stop */
+			stopSize = (width() - barSize) / std::max<int>(numStops, 1);
+			pos = (mx + stopSize / 2 - barSize / 2)
+				  * numStops
+				  / std::max<int>((width() - barSize), 1);
+		}
+		break;
+	case WSLD_RIGHT:
+		if (mx <= barSize / 2)
+		{
+			pos = numStops;
+		}
+		else if (mx >= width() - barSize / 2)
+		{
+			pos = 0;
+		}
+		else
+		{
+			/* Mouse is in the middle of the slider, calculate which stop */
+			stopSize = (width() - barSize) / std::max<int>(numStops, 1);
+			pos = numStops
+				  - (mx + stopSize / 2 - barSize / 2)
+				  * numStops
+				  / std::max<int>((width() - barSize), 1);
+		}
+		break;
+	case WSLD_TOP:
+		if (my <= barSize / 2)
+		{
+			pos = 0;
+		}
+		else if (my >= height() - barSize / 2)
+		{
+			pos = numStops;
+		}
+		else
+		{
+			/* Mouse is in the middle of the slider, calculate which stop */
+			stopSize = (height() - barSize) / std::max<int>(numStops, 1);
+			pos = (my + stopSize / 2 - barSize / 2)
+				  * numStops
+				  / std::max<int>((height() - barSize), 1);
+		}
+		break;
+	case WSLD_BOTTOM:
+		if (my <= barSize / 2)
+		{
+			pos = numStops;
+		}
+		else if (my >= height() - barSize / 2)
+		{
+			pos = 0;
+		}
+		else
+		{
+			/* Mouse is in the middle of the slider, calculate which stop */
+			stopSize = (height() - barSize) / std::max<int>(numStops, 1);
+			pos = numStops
+				  - (my + stopSize / 2 - barSize / 2)
+				  * numStops
+				  / std::max<int>((height() - barSize), 1);
+		}
+		break;
+	}
 }

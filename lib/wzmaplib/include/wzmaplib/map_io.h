@@ -21,10 +21,12 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <string>
 #include <memory>
 #include <vector>
-#include <optional-lite/optional.hpp>
+#include <functional>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -47,6 +49,7 @@ public:
 	virtual optional<size_t> readBytes(void *buffer, size_t len) = 0;
 	virtual optional<size_t> writeBytes(const void *buffer, size_t len) = 0;
 	virtual bool endOfStream() = 0;
+	virtual bool close() = 0;
 
 	virtual bool readULE8(uint8_t *pVal);
 	virtual bool readULE16(uint16_t *pVal);
@@ -61,6 +64,9 @@ public:
 	virtual bool writeSLE8(int8_t pVal);
 	virtual bool writeSLE16(int16_t pVal);
 	virtual bool writeSLE32(int32_t pVal);
+
+	virtual bool writeUBE32(uint32_t pVal);
+	virtual bool writeSBE32(int32_t pVal);
 };
 
 class IOProvider
@@ -73,8 +79,27 @@ public:
 
 public:
 	virtual std::unique_ptr<BinaryIOStream> openBinaryStream(const std::string& filename, BinaryIOStream::OpenMode mode) = 0;
-	virtual bool loadFullFile(const std::string& filename, std::vector<char>& fileData) = 0;
+	virtual bool loadFullFile(const std::string& filename, std::vector<char>& fileData, bool appendNullCharacter = false) = 0;
 	virtual bool writeFullFile(const std::string& filename, const char *ppFileData, uint32_t fileSize) = 0;
+
+	// Creates a directory (and any required parent directories) and returns true on success (or if the directory already exists)
+	virtual bool makeDirectory(const std::string& directoryPath) = 0;
+
+	virtual const char* pathSeparator() const = 0;
+
+	// enumFunc receives each enumerated file, and returns true to continue enumeration, or false to shortcut / stop enumeration
+	virtual bool enumerateFiles(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc);
+
+	// enumFunc receives each enumerated subfolder, and returns true to continue enumeration, or false to shortcut / stop enumeration
+	virtual bool enumerateFolders(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc);
+
+	virtual bool enumerateFilesRecursive(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc);
+	virtual bool enumerateFoldersRecursive(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc);
+
+public:
+	std::string pathJoin(const std::string& a, const std::string& b);
+	std::string pathDirName(const std::string& fullPath);
+	std::string pathBaseName(const std::string& fullPath);
 };
 
 // MARK: - Default implementation, using C stdio
@@ -83,8 +108,17 @@ class StdIOProvider : public IOProvider
 {
 public:
 	virtual std::unique_ptr<BinaryIOStream> openBinaryStream(const std::string& filename, BinaryIOStream::OpenMode mode) override;
-	virtual bool loadFullFile(const std::string& filename, std::vector<char>& fileData) override;
+	virtual bool loadFullFile(const std::string& filename, std::vector<char>& fileData, bool appendNullCharacter = false) override;
 	virtual bool writeFullFile(const std::string& filename, const char *ppFileData, uint32_t fileSize) override;
+	virtual bool makeDirectory(const std::string& directoryPath) override;
+
+	virtual const char* pathSeparator() const override;
+
+	virtual bool enumerateFiles(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc) override;
+	virtual bool enumerateFolders(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc) override;
+
+private:
+	bool internalMakeDir(const std::string& dirPath);
 };
 
 } // namespace WzMap

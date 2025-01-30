@@ -26,10 +26,10 @@
 
 #include "objectdef.h"
 #include "lib/framework/wzconfig.h"
+#include "lib/framework/paged_entity_container.h"
 
 /* The statistics for the features */
-extern FEATURE_STATS	*asFeatureStats;
-extern UDWORD			numFeatureStats;
+extern std::vector<FEATURE_STATS> asFeatureStats;
 
 //Value is stored for easy access to this feature in destroyDroid()/destroyStruct()
 extern FEATURE_STATS *oilResFeature;
@@ -42,6 +42,7 @@ void featureStatsShutDown();
 
 /* Create a feature on the map */
 FEATURE *buildFeature(FEATURE_STATS *psStats, UDWORD x, UDWORD y, bool FromSave);
+FEATURE *buildFeature(FEATURE_STATS *psStats, UDWORD x, UDWORD y, bool FromSave, uint32_t id);
 
 /* Update routine for features */
 void featureUpdate(FEATURE *psFeat);
@@ -55,7 +56,7 @@ bool destroyFeature(FEATURE *psDel, unsigned impactTime);
 /* get a feature stat id from its name */
 SDWORD getFeatureStatFromName(const WzString &name);
 
-int32_t featureDamage(FEATURE *psFeature, unsigned damage, WEAPON_CLASS weaponClass, WEAPON_SUBCLASS weaponSubClass, unsigned impactTime, bool isDamagePerSecond, int minDamage);
+int32_t featureDamage(FEATURE *psFeature, unsigned damage, WEAPON_CLASS weaponClass, WEAPON_SUBCLASS weaponSubClass, unsigned impactTime, bool isDamagePerSecond, int minDamage, bool empRadiusHit);
 
 void featureInitVars();
 
@@ -81,5 +82,11 @@ static inline FEATURE const *castFeature(SIMPLE_OBJECT const *psObject)
 {
 	return isFeature(psObject) ? (FEATURE const *)psObject : (FEATURE const *)nullptr;
 }
+
+// Split the feature storage into pages containing 128 features, disable slot reuse
+// to guard against memory-related issues when some object pointers won't get
+// updated properly, e.g. when transitioning between the base and offworld missions.
+using FeatureContainer = PagedEntityContainer<FEATURE, 128, false>;
+FeatureContainer& GlobalFeatureContainer();
 
 #endif // __INCLUDED_SRC_FEATURE_H__

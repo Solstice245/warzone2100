@@ -117,7 +117,7 @@ WzConfig::WzConfig(const WzString &name, WzConfig::warning warning)
 	ASSERT(!mRoot.is_null(), "JSON document from %s is null", name.toUtf8().c_str());
 	ASSERT(mRoot.is_object(), "JSON document from %s is not an object. Read: \n%s", name.toUtf8().c_str(), data);
 	free(data);
-	WZ_PHYSFS_enumerateFiles("diffs", [&](const char *i) -> bool {
+	WZ_PHYSFS_enumerateFolders("diffs", [&](const char *i) -> bool {
 		std::string str(std::string("diffs/") + i + std::string("/") + name.toUtf8().c_str());
 		if (!PHYSFS_exists(str.c_str()))
 		{
@@ -623,6 +623,46 @@ unsigned int json_variant::toUInt(bool *ok /*= nullptr*/) const
 		}
 		catch (const std::exception &e) {
 			debug(LOG_WARNING, "Failed to convert string '%s' to unsigned int because of error: %s", result.c_str(), e.what());
+			return 0;
+		}
+	}
+	else if (mObj.is_null())
+	{
+		return 0;
+	}
+	else
+	{
+		return 0;
+	}
+}
+
+uint64_t json_variant::toUint64(bool *ok /*= nullptr*/) const
+{
+	if (mObj.is_number())
+	{
+		return json_variant_toType<uint64_t>(*this, ok, 0);
+	}
+	else if (mObj.is_boolean())
+	{
+		bool result = json_variant_toType<bool>(*this, ok, false);
+		return (uint64_t)result;
+	}
+	else if (mObj.is_string())
+	{
+		std::string result = json_variant_toType<std::string>(*this, ok, std::string());
+		try {
+			unsigned long long ulonglongValue = std::stoull(result);
+#if ULLONG_MAX > UINT64_MAX
+			if (ulonglongValue > std::numeric_limits<uint64_t>::max())
+			{
+				debug(LOG_WARNING, "Failed to convert string '%s' to uint64_t because of error: value is > std::numeric_limits<uint64_t>::max()", result.c_str());
+				return 0;
+			}
+#endif
+			return (uint64_t)ulonglongValue;
+		}
+		catch (const std::exception &e) {
+			debug(LOG_WARNING, "Failed to convert string '%s' to uint64_t because of error: %s", result.c_str(), e.what());
 			return 0;
 		}
 	}

@@ -19,6 +19,7 @@
 
 #pragma once
 
+#include <cstdint>
 #include <vector>
 #include <string>
 #include <memory>
@@ -28,6 +29,6 @@ namespace WzMap {
 class Map;
 class LoggingProtocol;
 
-std::unique_ptr<Map> runMapScript(const std::vector<char>& fileBuffer, const std::string &path, uint32_t seed, bool preview, LoggingProtocol* pCustomLogger = nullptr);
+std::shared_ptr<Map> runMapScript(const std::vector<char>& fileBuffer, const std::string &path, uint32_t seed, bool preview, LoggingProtocol* pCustomLogger = nullptr);
 
 } // namespace WzMap

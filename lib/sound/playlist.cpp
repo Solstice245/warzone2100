@@ -18,7 +18,7 @@
 	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include <3rdparty/json/json.hpp> // Must come before WZ includes
+#include <nlohmann/json.hpp> // Must come before WZ includes
 
 #include "lib/framework/frame.h"
 #include "lib/framework/file.h"
@@ -34,7 +34,7 @@
 #include <sstream>
 #include <limits>
 
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -66,14 +66,14 @@ inline void from_json(const nlohmann::json& j, WZ_TRACK_SETTINGS& p)
 {
 	if (!j.is_object())
 	{
-		throw nlohmann::json::type_error::create(302, "type must be an object, but is " + std::string(j.type_name()), j);
+		throw nlohmann::json::type_error::create(302, "type must be an object, but is " + std::string(j.type_name()), &j);
 	}
 	auto it = j.find("music_modes");
 	if (it != j.end())
 	{
 		if (!it.value().is_array())
 		{
-			throw nlohmann::json::type_error::create(302, "music_modes type must be an array, but is " + std::string(j.type_name()), j);
+			throw nlohmann::json::type_error::create(302, "music_modes type must be an array, but is " + std::string(j.type_name()), &j);
 		}
 		size_t i = 0;
 		for (const auto& v : it.value())
@@ -513,7 +513,7 @@ bool PlayList_Read(const char *path)
 	char *data = nullptr;
 	std::string albumsPath = astringf("%s/albums", path);
 
-	WZ_PHYSFS_enumerateFiles(albumsPath.c_str(), [&](const char *i) -> bool {
+	WZ_PHYSFS_enumerateFolders(albumsPath.c_str(), [&](const char *i) -> bool {
 		std::string albumDir = albumsPath + "/" + i;
 		std::string str = albumDir + "/album.json";
 		if (!PHYSFS_exists(str.c_str()))

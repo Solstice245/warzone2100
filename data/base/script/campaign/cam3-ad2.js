@@ -1,13 +1,12 @@
 include("script/campaign/libcampaign.js");
 include("script/campaign/templates.js");
 
-const Y_SCROLL_LIMIT = 137;
-const LASSAT_FIRING = "pcv650.ogg"; // LASER SATELLITE FIRING!!!
-const NEXUS_RES = [
-	"R-Sys-Engineering03", "R-Defense-WallUpgrade10", "R-Struc-Materials10",
+const MIS_Y_SCROLL_LIMIT = 137;
+const mis_nexusRes = [
+	"R-Sys-Engineering03", "R-Defense-WallUpgrade12", "R-Struc-Materials10",
 	"R-Struc-VTOLPad-Upgrade06", "R-Wpn-Bomb-Damage03", "R-Sys-NEXUSrepair",
 	"R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02", "R-Cyborg-Legs02",
-	"R-Wpn-Mortar-Acc03", "R-Wpn-MG-Damage09", "R-Wpn-Mortar-ROF04",
+	"R-Wpn-Mortar-Acc03", "R-Wpn-MG-Damage10", "R-Wpn-Mortar-ROF04",
 	"R-Vehicle-Engine09", "R-Vehicle-Metals10", "R-Vehicle-Armor-Heat07",
 	"R-Cyborg-Metals10", "R-Cyborg-Armor-Heat07", "R-Wpn-RocketSlow-ROF06",
 	"R-Wpn-AAGun-Damage06", "R-Wpn-AAGun-ROF06", "R-Wpn-Howitzer-Damage09",
@@ -15,11 +14,28 @@ const NEXUS_RES = [
 	"R-Wpn-Missile-Damage03", "R-Wpn-Missile-ROF03", "R-Wpn-Missile-Accuracy02",
 	"R-Wpn-Rail-Damage03", "R-Wpn-Rail-ROF03", "R-Wpn-Rail-Accuracy01",
 	"R-Wpn-Energy-Damage03", "R-Wpn-Energy-ROF03", "R-Wpn-Energy-Accuracy01",
-	"R-Wpn-AAGun-Accuracy03", "R-Wpn-Howitzer-Accuracy03",
+	"R-Wpn-AAGun-Accuracy03", "R-Wpn-Howitzer-Accuracy03", "R-Sys-NEXUSsensor",
 ];
-const VTOL_POSITIONS = [
+const mis_nexusResClassic = [
+	"R-Defense-WallUpgrade09", "R-Struc-Materials09", "R-Struc-Factory-Upgrade06",
+	"R-Struc-VTOLPad-Upgrade06", "R-Vehicle-Engine09", "R-Vehicle-Metals09",
+	"R-Cyborg-Metals09", "R-Vehicle-Armor-Heat06", "R-Cyborg-Armor-Heat06",
+	"R-Sys-Engineering03", "R-Vehicle-Prop-Hover02", "R-Vehicle-Prop-VTOL02",
+	"R-Wpn-Bomb-Damage03", "R-Wpn-Energy-Accuracy01", "R-Wpn-Energy-Damage03",
+	"R-Wpn-Energy-ROF03", "R-Wpn-Missile-Accuracy01", "R-Wpn-Missile-Damage02",
+	"R-Wpn-Rail-Accuracy01", "R-Wpn-Rail-Damage03", "R-Wpn-Rail-ROF03",
+	"R-Sys-Sensor-Upgrade01", "R-Sys-NEXUSrepair", "R-Wpn-Flamer-Damage06",
+	"R-Sys-NEXUSsensor",
+];
+const mis_vtolPositions = [
 	"vtolAppearPosW", "vtolAppearPosE",
 ];
+const mis_researchTargets = {
+	missileCode1: "R-Comp-MissileCodes01",
+	missileCode2: "R-Comp-MissileCodes02",
+	missileCode3: "R-Comp-MissileCodes03",
+	resistance: "R-Sys-Resistance"
+};
 var winFlag;
 var mapLimit;
 var videoInfo; //holds some info about when to play a video.
@@ -35,24 +51,23 @@ camAreaEvent("vtolRemoveZone", function(droid)
 		}
 	}
 
-	resetLabel("vtolRemoveZone", NEXUS);
+	resetLabel("vtolRemoveZone", CAM_NEXUS);
 });
 
 //Return a random assortment of droids with the given templates.
 function randomTemplates(list)
 {
-	var i = 0;
-	var extras = [cTempl.nxmsens, cTempl.nxmsamh];
-	var droids = [];
-	var size = 12 + camRand(4); //Max of 15.
+	const extras = [cTempl.nxmsens, cTempl.nxmsamh];
+	const droids = [];
+	const SIZE = 12 + camRand(4); //Max of 15.
 
-	for (i = 0; i < size; ++i)
+	for (let i = 0; i < SIZE; ++i)
 	{
 		droids.push(list[camRand(list.length)]);
 	}
 
 	//Sensor and vindicator hovers.
-	for (i = 0; i < 4; ++i)
+	for (let i = 0; i < 4; ++i)
 	{
 		droids.push(extras[camRand(extras.length)]);
 	}
@@ -60,18 +75,60 @@ function randomTemplates(list)
 	return droids;
 }
 
-//Chose a random spawn point for the VTOLs.
+function wave2()
+{
+	const list = [cTempl.nxlpulsev, cTempl.nxlpulsev];
+	const ext = {
+		limit: [4, 4], //paired with list array
+		alternate: true,
+		altIdx: 0
+	};
+	camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
+}
+
+function wave3()
+{
+	const list = [cTempl.nxlpulsev, cTempl.nxmheapv];
+	const ext = {
+		limit: [4, 4], //paired with list array
+		alternate: true,
+		altIdx: 0
+	};
+	camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
+}
+
+//Setup Nexus VTOL hit and runners. Choose a random spawn point for the VTOLs.
 function vtolAttack()
 {
-	var list = [cTempl.nxmheapv, cTempl.nxlpulsev];
-	camSetVtolData(NEXUS, VTOL_POSITIONS, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)));
+	if (camClassicMode())
+	{
+		const list = [cTempl.nxlpulsev, cTempl.nxmheapv, cTempl.nxmheapv, cTempl.nxlpulsev];
+		const ext = {
+			limit: [2, 5, 5, 2], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
+	}
+	else
+	{
+		const list = [cTempl.nxmheapv, cTempl.nxmtherv];
+		const ext = {
+			limit: [4, 4], //paired with list array
+			alternate: true,
+			altIdx: 0
+		};
+		camSetVtolData(CAM_NEXUS, mis_vtolPositions, "vtolRemovePos", list, camChangeOnDiff(camMinutesToMilliseconds(3)), undefined, ext);
+		queue("wave2", camChangeOnDiff(camSecondsToMilliseconds(30)));
+		queue("wave3", camChangeOnDiff(camSecondsToMilliseconds(60)));
+	}
 }
 
 //Chose a random spawn point to send ground reinforcements.
 function phantomFactorySpawn()
 {
-	var list;
-	var chosenFactory;
+	let list;
+	let chosenFactory;
 
 	switch (camRand(3))
 	{
@@ -92,9 +149,9 @@ function phantomFactorySpawn()
 			chosenFactory = "phantomFacWest";
 	}
 
-	if (countDroid(DROID_ANY, NEXUS) < 80)
+	if (countDroid(DROID_ANY, CAM_NEXUS) < 80)
 	{
-		camSendReinforcement(NEXUS, camMakePos(chosenFactory), randomTemplates(list), CAM_REINFORCE_GROUND, {
+		camSendReinforcement(CAM_NEXUS, camMakePos(chosenFactory), randomTemplates(list), CAM_REINFORCE_GROUND, {
 			data: { regroup: false, count: -1, },
 		});
 	}
@@ -104,17 +161,17 @@ function phantomFactorySpawn()
 //when no target is found in the area.
 function vaporizeTarget()
 {
-	var target;
-	var targets = enumArea(0, Y_SCROLL_LIMIT, mapWidth, Math.floor(mapLimit), CAM_HUMAN_PLAYER, false).filter(function(obj) {
-		return obj.type === DROID || obj.type === STRUCTURE;
-	});
+	let target;
+	const targets = enumArea(0, MIS_Y_SCROLL_LIMIT, mapWidth, Math.floor(mapLimit), CAM_HUMAN_PLAYER, false).filter((obj) => (
+		obj.type === DROID || obj.type === STRUCTURE
+	));
 
 	if (!targets.length)
 	{
 		//Choose random coordinate within the limits.
 		target = {
 			x: camRand(mapWidth),
-			y: Y_SCROLL_LIMIT + camRand(mapHeight - Math.floor(mapLimit)),
+			y: MIS_Y_SCROLL_LIMIT + camRand(mapHeight - Math.floor(mapLimit)),
 		};
 
 		if (target.y > Math.floor(mapLimit))
@@ -124,9 +181,9 @@ function vaporizeTarget()
 	}
 	else
 	{
-		var dr = targets.filter(function(obj) { return obj.type === DROID && !isVTOL(obj); });
-		var vt = targets.filter(function(obj) { return obj.type === DROID && isVTOL(obj); });
-		var st = targets.filter(function(obj) { return obj.type === STRUCTURE; });
+		const dr = targets.filter((obj) => (obj.type === DROID && !isVTOL(obj)));
+		const vt = targets.filter((obj) => (obj.type === DROID && isVTOL(obj)));
+		const st = targets.filter((obj) => (obj.type === STRUCTURE));
 
 		if (dr.length)
 		{
@@ -142,7 +199,6 @@ function vaporizeTarget()
 		}
 	}
 
-
 	//Stop firing LasSat if the third missile unlock code was researched.
 	if (winFlag === false)
 	{
@@ -154,11 +210,22 @@ function vaporizeTarget()
 		}
 		if (Math.floor(mapLimit) < mapHeight)
 		{
-			//Need to travel about 119 tiles in ~1 hour so:
-			//119 tiles / 60 minutes = 1.983 tiles per minute
-			//1.983 tile per minute / 60 seconds = 0.03305 tiles per second
-			//0.03305 * 10 sec = ~0.33 tiles per blast at 10 second intervals.
-			mapLimit = mapLimit + 0.33; //sector clear; move closer
+			if (camClassicMode() && tweakOptions.camClassic_balance32)
+			{
+				//Need to travel about 119 tiles in 80 minutes so:
+				//119 tiles / 80 minutes = 1.4875 tiles per minute
+				//1.4875 tile per minute / 60 seconds = 0.02479 tiles per second
+				//0.02479 * 10 sec = ~0.24 tiles per blast at 10 second intervals.
+				mapLimit += 0.24; //sector clear; move closer
+			}
+			else
+			{
+				//Need to travel about 119 tiles in ~1 hour so:
+				//119 tiles / 60 minutes = 1.9833 tiles per minute
+				//1.9833 tile per minute / 60 seconds = 0.03305 tiles per second
+				//0.03305 * 10 sec = ~0.33 tiles per blast at 10 second intervals.
+				mapLimit += 0.33; //sector clear; move closer
+			}
 		}
 		laserSatFuzzyStrike(target);
 	}
@@ -171,18 +238,18 @@ function vaporizeTarget()
 //A simple way to fire the LasSat with a chance of missing.
 function laserSatFuzzyStrike(obj)
 {
-	const LOC = camMakePos(obj);
+	const loc = camMakePos(obj);
 	//Initially lock onto target
-	var xCoord = LOC.x;
-	var yCoord = LOC.y;
+	let xCoord = loc.x;
+	let yCoord = loc.y;
 
 	//Introduce some randomness. More accurate than last mission.
 	if (camRand(101) < 33)
 	{
-		var xRand = camRand(2);
-		var yRand = camRand(2);
-		xCoord = camRand(2) ? LOC.x - xRand : LOC.x + xRand;
-		yCoord = camRand(2) ? LOC.y - yRand : LOC.y + yRand;
+		const X_RAND = camRand(2);
+		const Y_RAND = camRand(2);
+		xCoord = camRand(2) ? loc.x - X_RAND : loc.x + X_RAND;
+		yCoord = camRand(2) ? loc.y - Y_RAND : loc.y + Y_RAND;
 	}
 
 	if (xCoord < 0)
@@ -207,11 +274,11 @@ function laserSatFuzzyStrike(obj)
 	{
 		if (camRand(101) < 40)
 		{
-			playSound(LASSAT_FIRING, xCoord, yCoord);
+			playSound(cam_sounds.laserSatelliteFiring, xCoord, yCoord);
 		}
 
 		//Missed it so hit close to target
-		if (LOC.x !== xCoord || LOC.y !== yCoord || !camDef(obj.id))
+		if (loc.x !== xCoord || loc.y !== yCoord || !camDef(obj.id))
 		{
 			fireWeaponAtLoc("LasSat", xCoord, yCoord, CAM_HUMAN_PLAYER);
 		}
@@ -226,17 +293,17 @@ function laserSatFuzzyStrike(obj)
 //Play videos and allow winning once the final one is researched.
 function eventResearched(research, structure, player)
 {
-	for (var i = 0, l = videoInfo.length; i < l; ++i)
+	for (let i = 0, l = videoInfo.length; i < l; ++i)
 	{
 		if (research.name === videoInfo[i].res && !videoInfo[i].played)
 		{
 			videoInfo[i].played = true;
 			camPlayVideos({video: videoInfo[i].video, type: videoInfo[i].type});
-			if (videoInfo[i].res === "R-Sys-Resistance")
+			if (videoInfo[i].res === mis_researchTargets.resistance)
 			{
-				enableResearch("R-Comp-MissileCodes01", CAM_HUMAN_PLAYER);
+				enableResearch(mis_researchTargets.missileCode1, CAM_HUMAN_PLAYER);
 			}
-			else if (videoInfo[i].res === "R-Comp-MissileCodes03")
+			else if (videoInfo[i].res === mis_researchTargets.missileCode3)
 			{
 				winFlag = true;
 			}
@@ -250,7 +317,14 @@ function checkTime()
 	if (getMissionTime() <= 2)
 	{
 		camPlayVideos({video: "MB3_AD2_MSG2", type: CAMP_MSG});
-		setMissionTime(camHoursToSeconds(1));
+		if (camClassicMode() && tweakOptions.camClassic_balance32)
+		{
+			setMissionTime(camMinutesToSeconds(80)); // To accommodate the research bug of 3.2 balance.
+		}
+		else
+		{
+			setMissionTime(camHoursToSeconds(1));
+		}
 
 		phantomFactorySpawn();
 		queue("vaporizeTarget", camSecondsToMilliseconds(2));
@@ -279,39 +353,44 @@ function eventStartLevel()
 {
 	camSetExtraObjectiveMessage(_("Protect the missile silos and research for the missile codes"));
 
-	var startpos = getObject("startPosition");
-	var lz = getObject("landingZone");
+	const startPos = getObject("startPosition");
+	const lz = getObject("landingZone");
 	mapLimit = 137.0;
 	winFlag = false;
 	videoInfo = [
-		{played: false, video: "MB3_AD2_MSG3", type: MISS_MSG, res: "R-Sys-Resistance"},
-		{played: false, video: "MB3_AD2_MSG4", type: CAMP_MSG, res: "R-Comp-MissileCodes01"},
-		{played: false, video: "MB3_AD2_MSG5", type: CAMP_MSG, res: "R-Comp-MissileCodes02"},
-		{played: false, video: "MB3_AD2_MSG6", type: CAMP_MSG, res: "R-Comp-MissileCodes03"},
+		{played: false, video: "MB3_AD2_MSG3", type: MISS_MSG, res: mis_researchTargets.resistance},
+		{played: false, video: "MB3_AD2_MSG4", type: CAMP_MSG, res: mis_researchTargets.missileCode1},
+		{played: false, video: "MB3_AD2_MSG5", type: CAMP_MSG, res: mis_researchTargets.missileCode2},
+		{played: false, video: "MB3_AD2_MSG6", type: CAMP_MSG, res: mis_researchTargets.missileCode3},
 	];
 
-	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, "CAM_3_4S", {
+	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, cam_levels.gammaEnd.pre, {
 		callback: "checkMissileSilos"
 	});
 
-	setScrollLimits(0, Y_SCROLL_LIMIT, 64, 256);
+	setScrollLimits(0, MIS_Y_SCROLL_LIMIT, 64, 256);
 
 	//Destroy everything above limits
-	var destroyZone = enumArea(0, 0, 64, Y_SCROLL_LIMIT, CAM_HUMAN_PLAYER, false);
-	for (var i = 0, l = destroyZone.length; i < l; ++i)
+	const destroyZone = enumArea(0, 0, 64, MIS_Y_SCROLL_LIMIT, CAM_HUMAN_PLAYER, false);
+	for (let i = 0, l = destroyZone.length; i < l; ++i)
 	{
 		camSafeRemoveObject(destroyZone[i], false);
 	}
 
-	centreView(startpos.x, startpos.y);
+	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
 	setMissionTime(camMinutesToSeconds(5));
-	enableResearch("R-Sys-Resistance", CAM_HUMAN_PLAYER);
+	enableResearch(mis_researchTargets.resistance, CAM_HUMAN_PLAYER);
 
-	var enemyLz = getObject("NXlandingZone");
-	setNoGoArea(enemyLz.x, enemyLz.y, enemyLz.x2, enemyLz.y2, NEXUS);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_nexusResClassic, CAM_NEXUS);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_nexusRes, CAM_NEXUS);
+	}
 
-	camCompleteRequiredResearch(NEXUS_RES, NEXUS);
 	camPlayVideos({video: "MB3_AD2_MSG", type: MISS_MSG});
 
 	setTimer("checkTime", camSecondsToMilliseconds(0.2));

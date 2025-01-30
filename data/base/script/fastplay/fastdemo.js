@@ -1,6 +1,5 @@
 include("script/campaign/libcampaign.js");
 include("script/campaign/templates.js");
-const SCAVENGER_PLAYER = 7;
 
 camAreaEvent("removeObjectiveBlip", function()
 {
@@ -17,9 +16,19 @@ camAreaEvent("factory2Trigger", function()
 	camEnableFactory("base2Factory");
 });
 
-camAreaEvent("factory3Trigger", function()
+function enableLastBase()
 {
 	camEnableFactory("base3Factory");
+}
+
+function enabledBase3()
+{
+	camCallOnce("enableLastBase");
+}
+
+camAreaEvent("factory3Trigger", function()
+{
+	queue("enabledBase3", camChangeOnDiff(camMinutesToMilliseconds(5)));
 	camManageGroup(camMakeGroup("scavBase3"), CAM_ORDER_DEFEND, {
 		pos: [
 			camMakePos("hillGroupPos1")
@@ -29,26 +38,29 @@ camAreaEvent("factory3Trigger", function()
 	});
 });
 
+camAreaEvent("factory3TriggerInstant", function()
+{
+	enabledBase3();
+});
+
 function grantStartTech()
 {
-	const TECH = [
+	const tech = [
 		"R-Wpn-MG1Mk1","R-Vehicle-Body01", "R-Sys-Spade1Mk1", "R-Vehicle-Prop-Wheels"
 	];
-	const STRUCTS = [
-		"A0CommandCentre", "A0PowerGenerator", "A0ResourceExtractor",
-		"A0ResearchFacility", "A0LightFactory"
+	const structs = [
+		cam_base_structures.commandCenter, cam_base_structures.powerGenerator,
+		cam_base_structures.derrick, cam_base_structures.researchLab,
+		cam_base_structures.factory,
 	];
 
-	camCompleteRequiredResearch(TECH, CAM_HUMAN_PLAYER);
-	for (var i = 0, l = STRUCTS.length; i < l; ++i)
+	camCompleteRequiredResearch(tech, CAM_HUMAN_PLAYER);
+	for (let i = 0, l = structs.length; i < l; ++i)
 	{
-		enableStructure(STRUCTS[i], CAM_HUMAN_PLAYER);
+		enableStructure(structs[i], CAM_HUMAN_PLAYER);
 	}
 
-	//NOTE: To prevent extra research from being exposed from the MG damage
-	//we are going to give the player the third damage upgrade.
-	enableResearch("R-Wpn-MG-Damage03", CAM_HUMAN_PLAYER);
-	completeResearch("R-Wpn-MG-Damage03", CAM_HUMAN_PLAYER);
+	enableResearch("R-Wpn-MG-Damage01", CAM_HUMAN_PLAYER);
 }
 
 function sendAttackGroup1()
@@ -124,16 +136,16 @@ function activateDefenders()
 function eventStartLevel()
 {
 	camSetStandardWinLossConditions(CAM_VICTORY_STANDARD, undefined);
-	var startpos = getObject("startPosition");
-	var lz = getObject("landingZone");
-	centreView(startpos.x, startpos.y);
+	const startPos = getObject("startPosition");
+	const lz = getObject("landingZone");
+	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
 
 	setReinforcementTime(-1);
 	setMissionTime(-1);
 	grantStartTech();
 
-	setPower(1000, CAM_HUMAN_PLAYER);
+	setPower(1500, CAM_HUMAN_PLAYER);
 
 	camSetEnemyBases({
 		"northBase": {
@@ -162,13 +174,13 @@ function eventStartLevel()
 		},
 	});
 
-	camSafeRemoveObject("flamerArti", false);
 	camSetArtifacts({
-		"base1Factory": { tech: "R-Defense-Tower01" },
-		"artifactPos": { tech: "R-Wpn-Flamer01Mk1" },
+		"base1Factory": { tech: ["R-Defense-Tower01", "R-Wpn-MG-Damage02"] },
+		"base1PowerGenerator": { tech: "R-Struc-PowerModuleMk1" },
+		"flamerArti": { tech: "R-Wpn-Flamer01Mk1" },
 		"radarTower": { tech: "R-Sys-Sensor-Turret01" },
-		"base2Factory": { tech: "R-Vehicle-Prop-Halftracks" },
-		"bunkerArti": { tech: "R-Sys-Engineering01" },
+		"base2Factory": { tech: ["R-Vehicle-Prop-Halftracks", "R-Wpn-Flamer-Damage01"] },
+		"bunkerArti": { tech: ["R-Sys-Engineering01", "R-Sys-MobileRepairTurret01" ]},
 	});
 
 	camSetFactories({
@@ -191,7 +203,7 @@ function eventStartLevel()
 			order: CAM_ORDER_ATTACK,
 			groupSize: 5,
 			throttle: camChangeOnDiff(camSecondsToMilliseconds(15)),
-			templates: [cTempl.rbjeep, cTempl.trike, cTempl.buggy, cTempl.rbjeep]
+			templates: [cTempl.rbjeep, cTempl.trike, cTempl.buggy, cTempl.bloke, cTempl.bjeep]
 		}
 	});
 

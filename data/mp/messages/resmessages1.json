@@ -82,7 +82,7 @@
 		"sequenceName": "res_droid.ogg",
 		"text": [
 			"New Cyborg Available",
-			"Armed with Lance Anti-Tank rocket",
+			"Armed with Lancer Anti-Tank rocket",
 			"Body Points: Medium",
 			"Requires Cyborg factory to produce"
 		]
@@ -258,7 +258,7 @@
 		"sequenceName": "res_struttech.ogg",
 		"text": [
 			"New Base Structure Available",
-			"Enables command turret research",
+			"Must be built to produce commanders",
 			"Directs and collates information for command turrets",
 			"Controls up to ten commanders"
 		]
@@ -314,7 +314,7 @@
 		"text": [
 			"Increases Damage Resistance",
 			"Reinforced Base Structure Materials",
-			"Armor +35%, Body Points +30%",
+			"Armor +120%, Body Points +90%",
 			"All base structures upgraded automatically"
 		]
 	},

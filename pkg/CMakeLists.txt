@@ -1,4 +1,9 @@
 #########################
+# Appstream
+
+add_subdirectory(appstream)
+
+#########################
 # Generator-specific components
 
 install(FILES
@@ -82,12 +87,9 @@ set(CPACK_PACKAGE_HOMEPAGE_URL  "https://wz2100.net")
 #########################
 # Default components that are added to package
 
-set(CPACK_COMPONENTS_ALL Core Data Docs Info Languages Fonts)
+set(CPACK_COMPONENTS_ALL Core Data Docs Info Languages)
 if(UNIX AND NOT APPLE)
 	list(APPEND CPACK_COMPONENTS_ALL Manpages)
-endif()
-if(WZ_WIN_HAS_PDB)
-	list(APPEND CPACK_COMPONENTS_ALL DebugSymbols)
 endif()
 set(CPACK_COMPONENTS_GROUPING ALL_COMPONENTS_IN_ONE)
 
@@ -99,15 +101,18 @@ set(CPACK_COMPONENT_CORE_REQUIRED ON)
 set(CPACK_COMPONENT_CORE_DESCRIPTION "Application")
 set(CPACK_COMPONENT_CORE_GROUP "CoreGroup")
 set(CPACK_COMPONENT_CORE_DEPENDS Data Docs Info)
-if(WZ_WIN_HAS_PDB)
-	list(APPEND CPACK_COMPONENT_CORE_DEPENDS DebugSymbols)
-endif()
 
 set(CPACK_COMPONENT_DEBUGSYMBOLS_DISPLAY_NAME "Debug Symbols")
 set(CPACK_COMPONENT_DEBUGSYMBOLS_REQUIRED ON)
 set(CPACK_COMPONENT_DEBUGSYMBOLS_DESCRIPTION "Debug Symbols")
 set(CPACK_COMPONENT_DEBUGSYMBOLS_GROUP "CoreGroup")
 set(CPACK_COMPONENT_DEBUGSYMBOLS_HIDDEN ON)
+
+set(CPACK_COMPONENT_ADDITIONALDEBUGSYMBOLS_DISPLAY_NAME "Additional Debug Symbols")
+set(CPACK_COMPONENT_ADDITIONALDEBUGSYMBOLS_REQUIRED ON)
+set(CPACK_COMPONENT_ADDITIONALDEBUGSYMBOLS_DESCRIPTION "Additional Debug Symbols")
+set(CPACK_COMPONENT_ADDITIONALDEBUGSYMBOLS_GROUP "CoreGroup")
+set(CPACK_COMPONENT_ADDITIONALDEBUGSYMBOLS_HIDDEN ON)
 
 set(CPACK_COMPONENT_DATA_DISPLAY_NAME "Data Files")
 set(CPACK_COMPONENT_DATA_REQUIRED ON)
@@ -123,11 +128,6 @@ set(CPACK_COMPONENT_INFO_DISPLAY_NAME "Info")
 set(CPACK_COMPONENT_INFO_REQUIRED ON)
 set(CPACK_COMPONENT_INFO_DESCRIPTION "Info Files")
 set(CPACK_COMPONENT_INFO_GROUP "CoreGroup")
-
-set(CPACK_COMPONENT_FONTS_DISPLAY_NAME "Fonts")
-set(CPACK_COMPONENT_FONTS_REQUIRED ON)
-set(CPACK_COMPONENT_FONTS_DESCRIPTION "Fonts")
-set(CPACK_COMPONENT_FONTS_GROUP "CoreGroup")
 
 set(CPACK_COMPONENT_PORTABLECONFIG_DISPLAY_NAME "Portable Configuration")
 set(CPACK_COMPONENT_PORTABLECONFIG_DESCRIPTION "Portable Configuration")
@@ -202,8 +202,8 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 	if(MSVC OR MINGW) # MINGW may link with the Universal C Runtime, and the VC runtime installer can be used to ensure that system component is installed
 		set(NSIS_MSVCRUNTIME "on")
 		# Determine the latest available version of the MSVC runtime
-		# Fetch https://aka.ms/vs/16/release/vc_redist.x64.exe
-		set(_vcredict_dl_url "https://aka.ms/vs/16/release/vc_redist.x64.exe")
+		# Fetch https://aka.ms/vs/17/release/vc_redist.x64.exe
+		set(_vcredict_dl_url "https://aka.ms/vs/17/release/vc_redist.x64.exe")
 		set(_tmp_vcredist_dl_path "${CMAKE_BINARY_DIR}/_tmp/vc_redist.x64.exe")
 		downloadFile("${_vcredict_dl_url}" "${_tmp_vcredist_dl_path}" 3 _dl_status_code _dl_status_string)
 		if (_dl_status_code EQUAL 0)
@@ -227,9 +227,9 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 			list(GET _applocalconfig_build_info_strings 0 NSIS_APPLOCALCONFIG_VERSION)
 			message(STATUS "NSIS_APPLOCALCONFIG_VERSION: \"${NSIS_APPLOCALCONFIG_VERSION}\"")
 			# Calculate the hashes for the current version
-			downloadFileCalculateHash("https://github.com/past-due/applocalconfig/releases/download/${NSIS_APPLOCALCONFIG_VERSION}/applocalconfig-vc2019-x86.zip" "${_tmp_applocalconfig_dir}" SHA512 _applocalconfig_x86_sha512)
-			downloadFileCalculateHash("https://github.com/past-due/applocalconfig/releases/download/${NSIS_APPLOCALCONFIG_VERSION}/applocalconfig-vc2019-x64.zip" "${_tmp_applocalconfig_dir}" SHA512 _applocalconfig_x64_sha512)
-			downloadFileCalculateHash("https://github.com/past-due/applocalconfig/releases/download/${NSIS_APPLOCALCONFIG_VERSION}/applocalconfig-vc2019-arm64.zip" "${_tmp_applocalconfig_dir}" SHA512 _applocalconfig_arm64_sha512)
+			downloadFileCalculateHash("https://github.com/past-due/applocalconfig/releases/download/${NSIS_APPLOCALCONFIG_VERSION}/applocalconfig-vc2022-x86.zip" "${_tmp_applocalconfig_dir}" SHA512 _applocalconfig_x86_sha512)
+			downloadFileCalculateHash("https://github.com/past-due/applocalconfig/releases/download/${NSIS_APPLOCALCONFIG_VERSION}/applocalconfig-vc2022-x64.zip" "${_tmp_applocalconfig_dir}" SHA512 _applocalconfig_x64_sha512)
+			downloadFileCalculateHash("https://github.com/past-due/applocalconfig/releases/download/${NSIS_APPLOCALCONFIG_VERSION}/applocalconfig-vc2022-arm64.zip" "${_tmp_applocalconfig_dir}" SHA512 _applocalconfig_arm64_sha512)
 			if(NOT _applocalconfig_x86_sha512 OR NOT _applocalconfig_x64_sha512 OR NOT _applocalconfig_arm64_sha512)
 				message(FATAL_ERROR "Unable to fetch / calculate hash for applocalconfig: ${NSIS_APPLOCALCONFIG_VERSION}")
 			endif()
@@ -305,6 +305,18 @@ elseif(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 	set(CPACK_DMG_DS_STORE_SETUP_SCRIPT "${CMAKE_CURRENT_SOURCE_DIR}/dmg/WZDMGSetup.scpt")
 	set(CPACK_DMG_VOLUME_NAME "Warzone 2100")
 
+elseif(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+	# Emscripten builds
+
+	# Only install the "Core" component, as it installs all of the data & supporting files & languages
+	set(CPACK_COMPONENTS_ALL Core)
+	unset(CPACK_COMPONENT_CORE_DEPENDS)
+	set(CPACK_ARCHIVE_COMPONENT_INSTALL ON)
+
+	# Default package generator for Emscripten (archive)
+	set(CPACK_GENERATOR "ZIP")
+	set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY FALSE)
+
 endif()
 
 #####################
@@ -376,8 +388,8 @@ list (APPEND CPACK_SOURCE_IGNORE_FILES "/data/sequences.wz")
 list (APPEND CPACK_SOURCE_IGNORE_FILES "/build_tools/autorevision.cache")
 
 # The macosx build directories
-list (APPEND CPACK_SOURCE_IGNORE_FILES "/macosx/build/")
-list (APPEND CPACK_SOURCE_IGNORE_FILES "/macosx/external/.*/")
+list (APPEND CPACK_SOURCE_IGNORE_FILES "/platforms/macos/build/")
+list (APPEND CPACK_SOURCE_IGNORE_FILES "/platforms/macos/external/.*/")
 
 # Ignore in-source vcpkg directory
 list (APPEND CPACK_SOURCE_IGNORE_FILES "/vcpkg/")

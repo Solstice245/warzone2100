@@ -18,6 +18,7 @@
 	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 */
 #include <string.h>
+#include <cstdlib>
 
 #include "lib/framework/frame.h"
 #include "lib/framework/fixedpoint.h"
@@ -29,6 +30,8 @@
 #include "lib/ivis_opengl/piestate.h"
 #include "lib/ivis_opengl/piefunc.h"
 #include "lib/ivis_opengl/bitimage.h"
+#include "lib/sound/audio.h"
+#include "lib/sound/audio_id.h"
 #include "lib/gamelib/gtime.h"
 #include "advvis.h"
 #include "objects.h"
@@ -45,10 +48,12 @@
 #include "warcam.h"
 #include "display.h"
 #include "mission.h"
+#include "campaigninfo.h"
 #include "multiplay.h"
 #include "intdisplay.h"
 #include "texture.h"
 #include "warzoneconfig.h"
+#include "order.h"
 #ifndef GLM_ENABLE_EXPERIMENTAL
 	#define GLM_ENABLE_EXPERIMENTAL
 #endif
@@ -66,9 +71,35 @@ bool radarRotationArrow = true; ///< display arrow when radar rotation enabled?
 
 static PIELIGHT		colRadarAlly, colRadarMe, colRadarEnemy;
 static PIELIGHT		tileColours[MAX_TILES];
-static UDWORD		*radarBuffer = nullptr;
+static iV_Image		radarBitmap;
 static UDWORD		*radarOverlayBuffer = nullptr;
 static Vector3i		playerpos = {0, 0, 0};
+
+class RadarWidget : public WIDGET {
+public:
+	RadarWidget();
+
+protected:
+	void display(int xOffset, int yOffset) override;
+	bool hitTest(int x, int y) const override;
+	void clicked(W_CONTEXT *, WIDGET_KEY = WKEY_PRIMARY) override;
+	void released(W_CONTEXT *, WIDGET_KEY = WKEY_PRIMARY) override;
+	void highlight(W_CONTEXT *) override;
+	void highlightLost() override;
+	bool capturesMouseDrag(WIDGET_KEY) override;
+	void mouseDragged(WIDGET_KEY, W_CONTEXT *start, W_CONTEXT *current) override;
+
+public:
+	bool hasHighlight() const { return m_hasHighlight; }
+	bool isRadarDragging() const { return m_handlingDrag; }
+
+private:
+	std::array<optional<Vector2i>, 3> m_clickPosition;
+	bool m_hasHighlight = false;
+	bool m_handlingDrag = false;
+};
+
+static std::shared_ptr<RadarWidget> pRadarWidget;
 
 PIELIGHT clanColours[] =
 {
@@ -190,6 +221,14 @@ static void radarSize(int ZoomLevel)
 		radarCenterY = pie_GetVideoBufferHeight() - BASE_GAP * 4 - static_cast<int>(radarHeight) / 2;
 	}
 	debug(LOG_WZ, "radar=(%u,%u) tex=(%zu,%zu) size=(%zu,%zu)", radarCenterX, radarCenterY, radarTexWidth, radarTexHeight, radarWidth, radarHeight);
+
+	if (pRadarWidget)
+	{
+		auto radarDiag = static_cast<size_t>(ceil(sqrt(double((radarWidth + 1) * (radarWidth + 1)) + double((radarHeight + 1) * (radarHeight + 1)))));
+		int radarX0 = radarCenterX - (radarDiag / 2);
+		int radarY0 = radarCenterY - (radarDiag / 2);
+		pRadarWidget->setGeometry(radarX0, radarY0, radarDiag, radarDiag);
+	}
 }
 
 void radarInitVars()
@@ -209,25 +248,25 @@ bool InitRadar()
 	colRadarAlly = WZCOL_YELLOW;
 	colRadarEnemy = WZCOL_RED;
 	colRadarMe = WZCOL_WHITE;
+	if (!pRadarWidget)
+	{
+		pRadarWidget = std::make_shared<RadarWidget>();
+	}
 	return true;
 }
 
 bool resizeRadar()
 {
-	if (radarBuffer)
-	{
-		free(radarBuffer);
-	}
+	radarBitmap.clear();
 	if (radarOverlayBuffer)
 	{
 		free(radarOverlayBuffer);
 	}
-	radarTexWidth = scrollMaxX - scrollMinX;
-	radarTexHeight = scrollMaxY - scrollMinY;
+	radarTexWidth = static_cast<size_t>(std::abs(scrollMaxX - scrollMinX));
+	radarTexHeight = static_cast<size_t>(std::abs(scrollMaxY - scrollMinY));
 	radarBufferSize = radarTexWidth * radarTexHeight * sizeof(UDWORD);
-	radarBuffer = (uint32_t *)malloc(radarBufferSize);
+	radarBitmap.allocate(radarTexWidth, radarTexHeight, 4, true);
 	radarOverlayBuffer = (uint32_t*)malloc(radarBufferSize);
-	memset(radarBuffer, 0, radarBufferSize);
 	memset(radarOverlayBuffer, 0, radarBufferSize);
 	frameSkip = 0;
 	if (rotateRadar)
@@ -247,11 +286,15 @@ bool resizeRadar()
 
 bool ShutdownRadar()
 {
-	free(radarBuffer);
-	radarBuffer = nullptr;
+	radarBitmap.clear();
 	free(radarOverlayBuffer);
 	radarOverlayBuffer = nullptr;
 	frameSkip = 0;
+	if (pRadarWidget)
+	{
+		psWScreen->psForm->detach(pRadarWidget);
+		pRadarWidget.reset();
+	}
 	return true;
 }
 
@@ -325,7 +368,7 @@ void drawRadar()
 
 	CalcRadarPixelSize(&pixSizeH, &pixSizeV);
 
-	ASSERT_OR_RETURN(, radarBuffer, "No radar buffer allocated");
+	ASSERT_OR_RETURN(, radarBitmap.bmp_w(), "No radar buffer allocated");
 	ASSERT_OR_RETURN(, radarOverlayBuffer, "No radar buffer allocated");
 
 	setViewingWindow();
@@ -336,7 +379,7 @@ void drawRadar()
 		DrawRadarTiles();
 		DrawRadarObjects();
 		applyMinimapOverlay();
-		pie_DownLoadRadar(radarBuffer);
+		pie_DownLoadRadar(radarBitmap);
 		frameSkip = RADAR_FRAME_SKIP;
 	}
 	frameSkip--;
@@ -455,21 +498,30 @@ static PIELIGHT inline appliedRadarColour(RADAR_DRAW_MODE drawMode, MAPTILE *WTi
 static void DrawRadarTiles()
 {
 	SDWORD	x, y;
+	size_t radarBufferSize2 = radarBitmap.size_in_bytes();
+	unsigned char* pRaderBuffer = radarBitmap.bmp_w();
 
 	for (x = scrollMinX; x < scrollMaxX; x++)
 	{
 		for (y = scrollMinY; y < scrollMaxY; y++)
 		{
 			MAPTILE	*psTile = mapTile(x, y);
-			size_t pos = radarTexWidth * (y - scrollMinY) + (x - scrollMinX);
+			size_t pixelStartPos = (radarTexWidth * (y - scrollMinY) + (x - scrollMinX)) * 4;
 
-			ASSERT(pos * sizeof(*radarBuffer) < radarBufferSize, "Buffer overrun");
+			ASSERT(pixelStartPos < radarBufferSize2, "Buffer overrun");
 			if (y == scrollMinY || x == scrollMinX || y == scrollMaxY - 1 || x == scrollMaxX - 1)
 			{
-				radarBuffer[pos] = WZCOL_BLACK.rgba;
+				pRaderBuffer[pixelStartPos] = WZCOL_BLACK.byte.r;
+				pRaderBuffer[pixelStartPos + 1] = WZCOL_BLACK.byte.g;
+				pRaderBuffer[pixelStartPos + 2] = WZCOL_BLACK.byte.b;
+				pRaderBuffer[pixelStartPos + 3] = WZCOL_BLACK.byte.a;
 				continue;
 			}
-			radarBuffer[pos] = appliedRadarColour(radarDrawMode, psTile).rgba;
+			auto radarColor = appliedRadarColour(radarDrawMode, psTile);
+			pRaderBuffer[pixelStartPos] = radarColor.byte.r;
+			pRaderBuffer[pixelStartPos + 1] = radarColor.byte.g;
+			pRaderBuffer[pixelStartPos + 2] = radarColor.byte.b;
+			pRaderBuffer[pixelStartPos + 3] = radarColor.byte.a;
 		}
 	}
 }
@@ -486,8 +538,6 @@ static void DrawRadarObjects()
 	/* Show droids on map - go through all players */
 	for (clan = 0; clan < MAX_PLAYERS; clan++)
 	{
-		DROID		*psDroid;
-
 		//see if have to draw enemy/ally color
 		if (bEnemyAllyRadarColor)
 		{
@@ -511,7 +561,7 @@ static void DrawRadarObjects()
 		flashCol = flashColours[getPlayerColour(clan)];
 
 		/* Go through all droids */
-		for (psDroid = apsDroidLists[clan]; psDroid != nullptr; psDroid = psDroid->psNext)
+		for (const DROID* psDroid : apsDroidLists[clan])
 		{
 			if (psDroid->pos.x < world_coord(scrollMinX) || psDroid->pos.y < world_coord(scrollMinY)
 			    || psDroid->pos.x >= world_coord(scrollMaxX) || psDroid->pos.y >= world_coord(scrollMaxY))
@@ -609,16 +659,22 @@ static void DrawRadarObjects()
 static void applyMinimapOverlay()
 {
 	size_t radarTexCount = radarTexWidth * radarTexHeight;
-	ASSERT(radarTexCount * sizeof(*radarBuffer) <= radarBufferSize, "Buffer overrun");
-	ASSERT(radarTexCount * sizeof(*radarOverlayBuffer) <= radarBufferSize, "Buffer overrun");
+	size_t radarBufferSize2 = radarBitmap.size_in_bytes();
+	unsigned char* pRaderBuffer = radarBitmap.bmp_w();
+	ASSERT(radarTexCount * static_cast<size_t>(radarBitmap.channels()) <= radarBufferSize2, "Buffer overrun");
+	ASSERT(radarTexCount * static_cast<size_t>(radarBitmap.channels()) <= radarBufferSize, "Buffer overrun");
 	for (size_t i = 0; i < radarTexCount; i++)
 	{
 		if (radarOverlayBuffer[i] == 0)
 			continue;
-		PIELIGHT baseColor = PLfromUDWORD(radarBuffer[i]);
+		size_t pixelStartPos = (i * 4);
+		PIELIGHT baseColor = pal_RGBA(pRaderBuffer[pixelStartPos], pRaderBuffer[pixelStartPos + 1], pRaderBuffer[pixelStartPos + 2], pRaderBuffer[pixelStartPos + 3]);
 		PIELIGHT overColor = PLfromUDWORD(radarOverlayBuffer[i]);
 		PIELIGHT mixedColor = mix(overColor, baseColor);
-		radarBuffer[i] = mixedColor.rgba;
+		pRaderBuffer[pixelStartPos] = mixedColor.byte.r;
+		pRaderBuffer[pixelStartPos + 1] = mixedColor.byte.g;
+		pRaderBuffer[pixelStartPos + 2] = mixedColor.byte.b;
+		pRaderBuffer[pixelStartPos + 3] = mixedColor.byte.a;
 	}
 }
 
@@ -767,4 +823,164 @@ void radarColour(UDWORD tileNumber, uint8_t r, uint8_t g, uint8_t b)
 	tileColours[tileNumber].byte.g = g;
 	tileColours[tileNumber].byte.b = b;
 	tileColours[tileNumber].byte.a = 255;
+}
+
+
+// MARK: - RadarWidget
+
+std::shared_ptr<WIDGET> getRadarWidget()
+{
+	return pRadarWidget;
+}
+
+RadarWidget::RadarWidget()
+:  WIDGET()
+{ }
+
+#define WKEY_ORDER (getRightClickOrders()?WKEY_SECONDARY:WKEY_PRIMARY)
+#define WKEY_SELECT (getRightClickOrders()?WKEY_PRIMARY:WKEY_SECONDARY)
+
+/* How far the mouse has to move to start a drag */
+#define DRAG_THRESHOLD	5
+
+bool RadarWidget::capturesMouseDrag(WIDGET_KEY wkey)
+{
+	return (wkey == WKEY_SELECT);
+}
+
+void RadarWidget::mouseDragged(WIDGET_KEY wkey, W_CONTEXT *psStartContext, W_CONTEXT *psContext)
+{
+	if (wkey != WKEY_SELECT)
+	{
+		return;
+	}
+
+	if (!getRotActive())
+	{
+		if (!m_handlingDrag)
+		{
+			if (ABSDIF(psStartContext->mx, psContext->mx) > DRAG_THRESHOLD ||
+				ABSDIF(psStartContext->my, psContext->my) > DRAG_THRESHOLD)
+			{
+				// start processing as drag
+				m_handlingDrag = true;
+			}
+		}
+
+		if (m_handlingDrag)
+		{
+			W_CONTEXT screenContext = psContext->convertToScreenContext();
+			int x = screenContext.mx;
+			int y = screenContext.my;
+			int PosX, PosY;
+			CalcRadarPosition(x, y, &PosX, &PosY);
+			setViewPos(PosX, PosY, true);
+			if (ctrlShiftDown())
+			{
+				playerPos.r.y = 0;
+			}
+		}
+	}
+}
+
+void RadarWidget::display(int xOffset, int yOffset)
+{
+	if (!radarVisible()) { return; }
+
+	gfx_api::context::get().debugStringMarker("Draw 3D scene - radar");
+	drawRadar();
+}
+
+bool RadarWidget::hitTest(int x, int y) const
+{
+	// NOTE: CoordInRadar expects x, y in *screen* coordinates - this is _currently_ the case as a byproduct of how the radar widget is added to the UI screen
+	return WIDGET::hitTest(x, y) && CoordInRadar(x, y);
+}
+
+void RadarWidget::clicked(W_CONTEXT *context, WIDGET_KEY key)
+{
+	int x = context->xOffset + context->mx;
+	int y = context->yOffset + context->my;
+
+	m_clickPosition[key] = Vector2i(x, y);
+}
+
+void RadarWidget::highlight(W_CONTEXT *)
+{
+	m_hasHighlight = true;
+}
+
+void RadarWidget::highlightLost()
+{
+	m_hasHighlight = false;
+	for (auto& keyClickPos : m_clickPosition)
+	{
+		keyClickPos.reset();
+	}
+}
+
+void RadarWidget::released(W_CONTEXT *context, WIDGET_KEY key)
+{
+	int PosX, PosY;
+	int x = context->xOffset + context->mx;
+	int y = context->yOffset + context->my;
+
+	if (key == WKEY_ORDER)
+	{
+		if (m_clickPosition[WKEY_ORDER].has_value())
+		{
+			x = m_clickPosition[WKEY_ORDER].value().x;
+			y = m_clickPosition[WKEY_ORDER].value().y;
+
+			/* If we're tracking a droid, then cancel that */
+			CalcRadarPosition(x, y, &PosX, &PosY);
+			if (selectedPlayer < MAX_PLAYERS)
+			{
+				// MARKER
+				// Send all droids to that location
+				orderSelectedLoc(selectedPlayer, (PosX * TILE_UNITS) + TILE_UNITS / 2,
+								 (PosY * TILE_UNITS) + TILE_UNITS / 2, ctrlShiftDown()); // ctrlShiftDown() = ctrl clicked a destination, add an order
+
+			}
+			CheckScrollLimits();
+			audio_PlayTrack(ID_SOUND_MESSAGEEND);
+		}
+	}
+
+	if (key == WKEY_SELECT && !m_handlingDrag)
+	{
+		if (m_clickPosition[WKEY_SELECT].has_value())
+		{
+			x = m_clickPosition[WKEY_SELECT].value().x;
+			y = m_clickPosition[WKEY_SELECT].value().y;
+
+			CalcRadarPosition(x, y, &PosX, &PosY);
+
+			if (war_GetRadarJump())
+			{
+				/* Go instantly */
+				setViewPos(PosX, PosY, true);
+			}
+			else
+			{
+				/* Pan to it */
+				requestRadarTrack(PosX * TILE_UNITS, PosY * TILE_UNITS);
+			}
+		}
+	}
+
+	m_clickPosition[key].reset();
+	m_handlingDrag = false;
+}
+
+bool isMouseOverRadar()
+{
+	if (!pRadarWidget) { return false; }
+	return pRadarWidget->hasHighlight();
+}
+
+bool isRadarDragging()
+{
+	if (!pRadarWidget) { return false; }
+	return pRadarWidget->isRadarDragging();
 }

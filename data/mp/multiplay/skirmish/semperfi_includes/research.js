@@ -24,6 +24,7 @@ const LATE_GAME_TECH = [
 const ROCKET_TECH = [
 	"R-Wpn-Rocket-ROF03",
 	"R-Wpn-Rocket03-HvAT",
+	"R-Defense-MRLHvy",
 	"R-Cyborg-Hvywpn-TK", //tank killer cyborg
 	"R-Defense-WallTower-HvyA-Trocket", //Tank-killer rocket and hardpoint
 	"R-Wpn-Rocket-Damage09",
@@ -74,7 +75,7 @@ const THERMAL_ALLOYS = [
 ];
 const STRUCTURE_DEFENSE_UPGRADES = [
 	"R-Defense-WallUpgrade12",
-	"R-Struc-Materials09",
+	"R-Struc-Materials03",
 ];
 const FLAMER_TECH = [
 	"R-Wpn-Flamer-ROF03",
@@ -99,7 +100,7 @@ function evalResearch(labID, list)
 	{
 		return true;
 	}
-	for (var i = 0, l = list.length; i < l; ++i)
+	for (let i = 0, l = list.length; i < l; ++i)
 	{
 		if (!getResearch(list[i]).done && pursueResearch(lab, list[i]))
 		{
@@ -125,12 +126,12 @@ function lookForResearch(tech, labParam)
 	}
 	else
 	{
-		labList = enumStruct(me, RES_LAB_STAT).filter(function(lab) {
-			return (lab.status === BUILT && structureIdle(lab));
-		});
+		labList = enumStruct(me, RES_LAB_STAT).filter((lab) => (
+			lab.status === BUILT && structureIdle(lab)
+		));
 	}
 
-	for (var i = 0, r = labList.length; i < r; ++i)
+	for (let i = 0, r = labList.length; i < r; ++i)
 	{
 		var lab = labList[i];
 		var found = evalResearch(lab.id, FUNDAMENTALS);

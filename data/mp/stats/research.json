@@ -7,8 +7,8 @@
 		"requiredResearch": [
 			"R-Struc-CommandRelay"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultComponents": [
 			"CommandBrain01",
 			"CommandTurret1"
@@ -22,10 +22,11 @@
 		"name": "Command Turret Upgrade",
 		"requiredResearch": [
 			"R-Comp-CommandTurret01",
+			"R-Sys-Sensor-Upgrade02",
 			"R-Struc-Research-Upgrade07"
 		],
-		"researchPoints": 5000,
-		"researchPower": 450,
+		"researchPoints": 2500,
+		"researchPower": 78,
 		"results": [
 			{
 				"class": "Brain",
@@ -53,16 +54,6 @@
 			}
 		],
 		"statID": "CommandBrain01"
-	},
-	"R-Comp-SynapticLink": {
-		"iconID": "IMAGE_RES_COMPUTERTECH",
-		"id": "R-Comp-SynapticLink",
-		"imdName": "icsynapt.PIE",
-		"keyTopic": 1,
-		"msgName": "RES_C_SL1",
-		"name": "Synaptic Link",
-		"researchPoints": 1200,
-		"researchPower": 37
 	},
 	"R-Cyborg-Armor-Heat01": {
 		"iconID": "IMAGE_RES_CYBORGTECH",
@@ -337,6 +328,7 @@
 		"msgName": "RES_CYW_H_PLAS",
 		"name": "Super Pulse Laser Cyborg",
 		"requiredResearch": [
+			"R-Cyborg-Metals04",
 			"R-Wpn-Laser02"
 		],
 		"researchPoints": 5000,
@@ -357,6 +349,7 @@
 			"Cyb-Hvywpn-Acannon"
 		],
 		"requiredResearch": [
+			"R-Cyborg-Metals04",
 			"R-Wpn-RailGun02"
 		],
 		"researchPoints": 5500,
@@ -653,7 +646,6 @@
 		"disabledWhen": 4,
 		"iconID": "IMAGE_RES_CYBORGTECH",
 		"id": "R-Cyborg-Transport",
-		"keyTopic": 1,
 		"msgName": "RES_CYTRANS",
 		"name": "Cyborg Transport",
 		"requiredResearch": [
@@ -675,8 +667,8 @@
 		"requiredResearch": [
 			"R-Wpn-AALaser"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"P0-AASite-Laser"
 		],
@@ -690,8 +682,8 @@
 		"requiredResearch": [
 			"R-Wpn-AAGun01"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"AASite-QuadBof"
 		],
@@ -708,8 +700,8 @@
 		"requiredResearch": [
 			"R-Wpn-AAGun02"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"AASite-QuadBof02"
 		],
@@ -718,14 +710,13 @@
 	"R-Defense-AASite-QuadMg1": {
 		"iconID": "IMAGE_RES_DEFENCE",
 		"id": "R-Defense-AASite-QuadMg1",
-		"keyTopic": 1,
 		"msgName": "RES_EMP_AA2",
 		"name": "Hurricane AA Site",
 		"requiredResearch": [
 			"R-Wpn-AAGun03"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"AASite-QuadMg1"
 		],
@@ -743,8 +734,8 @@
 			"R-Wpn-AAGun04",
 			"R-Defense-AASite-QuadMg1"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"AASite-QuadRotMg"
 		],
@@ -759,8 +750,8 @@
 			"R-Defense-WallUpgrade04",
 			"R-Wpn-Cannon6TwinAslt"
 		],
-		"researchPoints": 6400,
-		"researchPower": 200,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"PillBox-Cannon6"
 		],
@@ -774,8 +765,8 @@
 		"requiredResearch": [
 			"R-Wpn-EMPCannon"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"WallTower-EMP"
 		],
@@ -789,8 +780,8 @@
 		"requiredResearch": [
 			"R-Wpn-MortarEMP"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"Emplacement-MortarEMP"
 		],
@@ -807,8 +798,8 @@
 		"requiredResearch": [
 			"R-Wpn-Cannon4AMk1"
 		],
-		"researchPoints": 3200,
-		"researchPower": 100,
+		"researchPoints": 900,
+		"researchPower": 28,
 		"resultStructures": [
 			"Emplacement-HPVcannon"
 		],
@@ -825,8 +816,8 @@
 		"requiredResearch": [
 			"R-Wpn-Missile2A-T"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1400,
+		"researchPower": 43,
 		"resultStructures": [
 			"GuardTower-ATMiss"
 		],
@@ -843,8 +834,8 @@
 		"requiredResearch": [
 			"R-Wpn-RailGun01"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1400,
+		"researchPower": 43,
 		"resultStructures": [
 			"GuardTower-Rail1"
 		],
@@ -853,13 +844,13 @@
 	"R-Defense-HardcreteGate": {
 		"iconID": "IMAGE_RES_DEFENCE",
 		"id": "R-Defense-HardcreteGate",
-		"msgName": "RES_DF_HCW1",
+		"msgName": "RES_DF_HCW2",
 		"name": "Hardcrete Gate",
 		"requiredResearch": [
 			"R-Defense-HardcreteWall"
 		],
-		"researchPoints": 1800,
-		"researchPower": 56,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"A0HardcreteMk1Gate"
 		],
@@ -868,7 +859,6 @@
 	"R-Defense-HardcreteWall": {
 		"iconID": "IMAGE_RES_DEFENCE",
 		"id": "R-Defense-HardcreteWall",
-		"keyTopic": 1,
 		"msgName": "RES_DF_HCW1",
 		"name": "Hardcrete",
 		"requiredResearch": [
@@ -890,8 +880,8 @@
 		"requiredResearch": [
 			"R-Wpn-HvyLaser"
 		],
-		"researchPoints": 20400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"Emplacement-HeavyLaser"
 		],
@@ -951,8 +941,8 @@
 		"requiredResearch": [
 			"R-Wpn-Rocket07-Tank-Killer"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"Emplacement-HvyATrocket"
 		],
@@ -989,8 +979,8 @@
 		"requiredResearch": [
 			"R-Wpn-Flame2"
 		],
-		"researchPoints": 4000,
-		"researchPower": 125,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"Tower-Projector"
 		],
@@ -1024,8 +1014,8 @@
 			"R-Defense-MortarPit",
 			"R-Wpn-Mortar02Hvy"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"Emplacement-MortarPit02"
 		],
@@ -1056,12 +1046,30 @@
 			"R-Wpn-Rocket02-MRL",
 			"R-Defense-HardcreteWall"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 800,
+		"researchPower": 25,
 		"resultStructures": [
 			"Emplacement-MRL-pit"
 		],
 		"statID": "Emplacement-MRL-pit"
+	},
+	"R-Defense-MRLHvy": {
+		"iconID": "IMAGE_RES_DEFENCE",
+		"id": "R-Defense-MRLHvy",
+		"name": "Heavy Rocket Battery",
+		"redStructures": [
+			"Emplacement-MRL-pit"
+		],
+		"requiredResearch": [
+			"R-Defense-HardcreteWall",
+			"R-Wpn-Rocket02-MRLHvy"
+		],
+		"researchPoints": 1200,
+		"researchPower": 37,
+		"resultStructures": [
+			"Emplacement-MRLHvy-pit"
+		],
+		"statID": "Emplacement-MRLHvy-pit"
 	},
 	"R-Defense-MassDriver": {
 		"iconID": "IMAGE_RES_DEFENCE",
@@ -1086,13 +1094,14 @@
 		"msgName": "RES_EMP_MdAM",
 		"name": "Seraph Missile Battery",
 		"redStructures": [
-			"Emplacement-MRL-pit"
+			"Emplacement-MRL-pit",
+			"Emplacement-MRLHvy-pit"
 		],
 		"requiredResearch": [
 			"R-Wpn-MdArtMissile"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"Emplacement-MdART-pit"
 		],
@@ -1107,8 +1116,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-Mortar01Lt"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"Emplacement-MortarPit01"
 		],
@@ -1123,8 +1132,8 @@
 			"R-Wpn-Mortar-Incendiary",
 			"R-Defense-MortarPit"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"Emplacement-MortarPit-Incendiary"
 		],
@@ -1139,8 +1148,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-MG-Damage01"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"PillBox1"
 		],
@@ -1155,8 +1164,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-Cannon1Mk1"
 		],
-		"researchPoints": 1500,
-		"researchPower": 46,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"PillBox4"
 		],
@@ -1171,8 +1180,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-Flamer01Mk1"
 		],
-		"researchPoints": 1500,
-		"researchPower": 46,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"PillBox5"
 		],
@@ -1187,8 +1196,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-Rocket01-LtAT"
 		],
-		"researchPoints": 1500,
-		"researchPower": 46,
+		"researchPoints": 900,
+		"researchPower": 28,
 		"resultStructures": [
 			"GuardTower5"
 		],
@@ -1202,12 +1211,12 @@
 		"requiredResearch": [
 			"R-Wpn-PlasmaCannon"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"Emplacement-PlasmaCannon"
 		],
-		"statID": "Emplacement-PulseLaser"
+		"statID": "Emplacement-PlasmaCannon"
 	},
 	"R-Defense-PlasmiteFlamer": {
 		"iconID": "IMAGE_RES_DEFENCE",
@@ -1221,8 +1230,8 @@
 		"requiredResearch": [
 			"R-Wpn-Plasmite-Flamer"
 		],
-		"researchPoints": 4000,
-		"researchPower": 125,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"Plasmite-flamer-bunker"
 		],
@@ -1236,8 +1245,8 @@
 		"requiredResearch": [
 			"R-Wpn-Laser01"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1400,
+		"researchPower": 43,
 		"resultStructures": [
 			"Emplacement-PrisLas"
 		],
@@ -1251,8 +1260,8 @@
 		"requiredResearch": [
 			"R-Wpn-Laser02"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"GuardTower-BeamLas"
 		],
@@ -1266,8 +1275,8 @@
 		"requiredResearch": [
 			"R-Wpn-RailGun02"
 		],
-		"researchPoints": 10000,
-		"researchPower": 312,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"Emplacement-Rail2"
 		],
@@ -1284,8 +1293,8 @@
 		"requiredResearch": [
 			"R-Wpn-RailGun03"
 		],
-		"researchPoints": 10000,
-		"researchPower": 312,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"Emplacement-Rail3"
 		],
@@ -1321,8 +1330,8 @@
 		"requiredResearch": [
 			"R-Wpn-MG4"
 		],
-		"researchPoints": 3600,
-		"researchPower": 112,
+		"researchPoints": 1100,
+		"researchPower": 34,
 		"resultStructures": [
 			"Pillbox-RotMG"
 		],
@@ -1340,8 +1349,8 @@
 			"R-Defense-MortarPit",
 			"R-Wpn-Mortar3"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"Emplacement-RotMor"
 		],
@@ -1355,8 +1364,8 @@
 		"requiredResearch": [
 			"R-Wpn-Missile-LtSAM"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"P0-AASite-SAM1"
 		],
@@ -1373,8 +1382,8 @@
 		"requiredResearch": [
 			"R-Wpn-Missile-HvSAM"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"P0-AASite-SAM2"
 		],
@@ -1387,8 +1396,8 @@
 		"requiredResearch": [
 			"R-Wpn-Sunburst"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"P0-AASite-Sunburst"
 		],
@@ -1452,8 +1461,8 @@
 		"requiredResearch": [
 			"R-Sys-Engineering01"
 		],
-		"researchPoints": 600,
-		"researchPower": 18,
+		"researchPoints": 300,
+		"researchPower": 9,
 		"resultStructures": [
 			"A0TankTrap"
 		],
@@ -1462,7 +1471,6 @@
 	"R-Defense-Tower01": {
 		"iconID": "IMAGE_RES_DEFENCE",
 		"id": "R-Defense-Tower01",
-		"keyTopic": 1,
 		"msgName": "RES_TOWER1",
 		"name": "Heavy Machinegun Guard Tower",
 		"requiredResearch": [
@@ -1487,8 +1495,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-Rocket05-MiniPod"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"GuardTower6"
 		],
@@ -1503,10 +1511,10 @@
 			"WallTower01"
 		],
 		"requiredResearch": [
-			"R-Defense-RotMG"
+			"R-Wpn-MG4"
 		],
-		"researchPoints": 3600,
-		"researchPower": 112,
+		"researchPoints": 1100,
+		"researchPower": 34,
 		"resultStructures": [
 			"Wall-RotMg"
 		],
@@ -1523,8 +1531,8 @@
 		"requiredResearch": [
 			"R-Wpn-Cannon5"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 1100,
+		"researchPower": 34,
 		"resultStructures": [
 			"Wall-VulcanCan"
 		],
@@ -1541,8 +1549,8 @@
 		"requiredResearch": [
 			"R-Wpn-Missile2A-T"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1400,
+		"researchPower": 43,
 		"resultStructures": [
 			"WallTower-Atmiss"
 		],
@@ -1556,8 +1564,8 @@
 		"requiredResearch": [
 			"R-Wpn-AAGun01"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 1000,
+		"researchPower": 31,
 		"resultStructures": [
 			"WallTower-DoubleAAGun"
 		],
@@ -1574,8 +1582,8 @@
 		"requiredResearch": [
 			"R-Wpn-AAGun02"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"WallTower-DoubleAAGun02"
 		],
@@ -1592,8 +1600,8 @@
 		"requiredResearch": [
 			"R-Wpn-Cannon4AMk1"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 900,
+		"researchPower": 28,
 		"resultStructures": [
 			"WallTower-HPVcannon"
 		],
@@ -1607,8 +1615,8 @@
 		"requiredResearch": [
 			"R-Wpn-Rocket07-Tank-Killer"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"WallTower-HvATrocket"
 		],
@@ -1622,8 +1630,8 @@
 		"requiredResearch": [
 			"R-Wpn-Laser02"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"WallTower-PulseLas"
 		],
@@ -1635,10 +1643,10 @@
 		"msgName": "RES_WT_QUADAA",
 		"name": "Whirlwind Hardpoint",
 		"requiredResearch": [
-			"R-Defense-AASite-QuadRotMg"
+			"R-Wpn-AAGun04"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"WallTower-QuadRotAAGun"
 		],
@@ -1652,8 +1660,8 @@
 		"requiredResearch": [
 			"R-Wpn-RailGun02"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"WallTower-Rail2"
 		],
@@ -1670,8 +1678,8 @@
 		"requiredResearch": [
 			"R-Wpn-RailGun03"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"WallTower-Rail3"
 		],
@@ -1686,11 +1694,10 @@
 			"WallTower-SamSite"
 		],
 		"requiredResearch": [
-			"R-Wpn-Missile-HvSAM",
-			"R-Defense-WallUpgrade07"
+			"R-Wpn-Missile-HvSAM"
 		],
-		"researchPoints": 18000,
-		"researchPower": 450,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"WallTower-SamHvy"
 		],
@@ -1702,11 +1709,10 @@
 		"msgName": "RES_MS_SAM1WT",
 		"name": "Avenger Hardpoint",
 		"requiredResearch": [
-			"R-Defense-WallUpgrade07",
-			"R-Defense-SamSite1"
+			"R-Wpn-Missile-LtSAM"
 		],
-		"researchPoints": 10800,
-		"researchPower": 337,
+		"researchPoints": 1500,
+		"researchPower": 46,
 		"resultStructures": [
 			"WallTower-SamSite"
 		],
@@ -1723,8 +1729,8 @@
 		"requiredResearch": [
 			"R-Wpn-MG5"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"WallTower-TwinAssaultGun"
 		],
@@ -1739,8 +1745,8 @@
 			"R-Defense-Pillbox01",
 			"R-Wpn-MG3Mk1"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"WallTower01"
 		],
@@ -1755,8 +1761,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Wpn-Cannon1Mk1"
 		],
-		"researchPoints": 1500,
-		"researchPower": 46,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"WallTower02"
 		],
@@ -1774,8 +1780,8 @@
 			"R-Wpn-Cannon2Mk1",
 			"R-Defense-WallTower02"
 		],
-		"researchPoints": 1800,
-		"researchPower": 56,
+		"researchPoints": 800,
+		"researchPower": 25,
 		"resultStructures": [
 			"WallTower03"
 		],
@@ -1790,8 +1796,8 @@
 			"R-Defense-WallTower03",
 			"R-Wpn-Cannon3Mk1"
 		],
-		"researchPoints": 2400,
-		"researchPower": 75,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"WallTower04"
 		],
@@ -1806,8 +1812,8 @@
 			"R-Wpn-Rocket01-LtAT",
 			"R-Defense-HardcreteWall"
 		],
-		"researchPoints": 1500,
-		"researchPower": 46,
+		"researchPoints": 900,
+		"researchPower": 28,
 		"resultStructures": [
 			"WallTower06"
 		],
@@ -2166,7 +2172,6 @@
 	"R-Struc-CommandRelay": {
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-CommandRelay",
-		"keyTopic": 1,
 		"msgName": "RES_ST_CR1",
 		"name": "Command Relay Post",
 		"requiredResearch": [
@@ -2201,7 +2206,6 @@
 	"R-Struc-Factory-Module": {
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-Factory-Module",
-		"keyTopic": 1,
 		"msgName": "RES_ST_FM1",
 		"name": "Factory Module",
 		"requiredResearch": [
@@ -2219,7 +2223,6 @@
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-Factory-Upgrade01",
 		"imdName": "BLFACT1.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_ST_FU1",
 		"name": "Automated Manufacturing",
 		"requiredResearch": [
@@ -2240,7 +2243,6 @@
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-Factory-Upgrade04",
 		"imdName": "BLFACT1.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_ST_FU4",
 		"name": "Robotic Manufacturing",
 		"requiredResearch": [
@@ -2262,7 +2264,6 @@
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-Factory-Upgrade07",
 		"imdName": "BLFACT1.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_ST_FU7",
 		"name": "Advanced Manufacturing",
 		"requiredResearch": [
@@ -2309,34 +2310,6 @@
 		"requiredResearch": [
 			"R-Defense-WallUpgrade01"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
-		"results": [
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "Armour",
-				"value": 35
-			},
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "HitPoints",
-				"value": 30
-			}
-		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG"
-	},
-	"R-Struc-Materials02": {
-		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials02",
-		"imdName": "icmolql.pie",
-		"name": "Reinforced Base Structure Materials Mk2",
-		"requiredResearch": [
-			"R-Struc-Materials01"
-		],
 		"researchPoints": 2400,
 		"researchPower": 75,
 		"results": [
@@ -2345,57 +2318,27 @@
 				"filterParameter": "Type",
 				"filterValue": "Structure",
 				"parameter": "Armour",
-				"value": 35
+				"value": 120
 			},
 			{
 				"class": "Building",
 				"filterParameter": "Type",
 				"filterValue": "Structure",
 				"parameter": "HitPoints",
-				"value": 30
+				"value": 90
 			}
 		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG",
-		"techCode": 1
+		"subgroupIconID": "IMAGE_RES_GRPUPG"
 	},
-	"R-Struc-Materials03": {
+	"R-Struc-Materials02": {
 		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials03",
-		"imdName": "icmolql.pie",
-		"name": "Reinforced Base Structure Materials Mk3",
-		"requiredResearch": [
-			"R-Struc-Materials02"
-		],
-		"researchPoints": 3600,
-		"researchPower": 112,
-		"results": [
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "Armour",
-				"value": 35
-			},
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "HitPoints",
-				"value": 30
-			}
-		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG",
-		"techCode": 1
-	},
-	"R-Struc-Materials04": {
-		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials04",
+		"id": "R-Struc-Materials02",
 		"imdName": "icmolql.pie",
 		"msgName": "RES_ST_MAT4",
 		"name": "Hardened Base Structure Materials",
 		"requiredResearch": [
 			"R-Defense-WallUpgrade04",
-			"R-Struc-Materials03"
+			"R-Struc-Materials01"
 		],
 		"researchPoints": 6000,
 		"researchPower": 187,
@@ -2405,85 +2348,27 @@
 				"filterParameter": "Type",
 				"filterValue": "Structure",
 				"parameter": "Armour",
-				"value": 35
+				"value": 120
 			},
 			{
 				"class": "Building",
 				"filterParameter": "Type",
 				"filterValue": "Structure",
 				"parameter": "HitPoints",
-				"value": 30
+				"value": 90
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
 	},
-	"R-Struc-Materials05": {
+	"R-Struc-Materials03": {
 		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials05",
-		"imdName": "icmolql.pie",
-		"name": "Hardened Base Structure Materials Mk2",
-		"requiredResearch": [
-			"R-Struc-Materials04"
-		],
-		"researchPoints": 8000,
-		"researchPower": 250,
-		"results": [
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "Armour",
-				"value": 35
-			},
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "HitPoints",
-				"value": 30
-			}
-		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG",
-		"techCode": 1
-	},
-	"R-Struc-Materials06": {
-		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials06",
-		"imdName": "icmolql.pie",
-		"name": "Hardened Base Structure Materials Mk3",
-		"requiredResearch": [
-			"R-Struc-Materials05"
-		],
-		"researchPoints": 10000,
-		"researchPower": 312,
-		"results": [
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "Armour",
-				"value": 35
-			},
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "HitPoints",
-				"value": 30
-			}
-		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG",
-		"techCode": 1
-	},
-	"R-Struc-Materials07": {
-		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials07",
+		"id": "R-Struc-Materials03",
 		"imdName": "icmolql.pie",
 		"msgName": "RES_ST_MAT7",
 		"name": "Advanced Base Structure Materials",
 		"requiredResearch": [
 			"R-Defense-WallUpgrade07",
-			"R-Struc-Materials06"
+			"R-Struc-Materials02"
 		],
 		"researchPoints": 12000,
 		"researchPower": 375,
@@ -2493,81 +2378,22 @@
 				"filterParameter": "Type",
 				"filterValue": "Structure",
 				"parameter": "Armour",
-				"value": 35
+				"value": 120
 			},
 			{
 				"class": "Building",
 				"filterParameter": "Type",
 				"filterValue": "Structure",
 				"parameter": "HitPoints",
-				"value": 30
+				"value": 90
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
-	},
-	"R-Struc-Materials08": {
-		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials08",
-		"imdName": "icmolql.pie",
-		"name": "Advanced Base Structure Materials Mk2",
-		"requiredResearch": [
-			"R-Struc-Materials07"
-		],
-		"researchPoints": 14000,
-		"researchPower": 437,
-		"results": [
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "Armour",
-				"value": 35
-			},
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "HitPoints",
-				"value": 30
-			}
-		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG",
-		"techCode": 1
-	},
-	"R-Struc-Materials09": {
-		"iconID": "IMAGE_RES_STRUCTURETECH",
-		"id": "R-Struc-Materials09",
-		"imdName": "icmolql.pie",
-		"name": "Advanced Base Structure Materials Mk3",
-		"requiredResearch": [
-			"R-Struc-Materials08"
-		],
-		"researchPoints": 16000,
-		"researchPower": 450,
-		"results": [
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "Armour",
-				"value": 35
-			},
-			{
-				"class": "Building",
-				"filterParameter": "Type",
-				"filterValue": "Structure",
-				"parameter": "HitPoints",
-				"value": 30
-			}
-		],
-		"subgroupIconID": "IMAGE_RES_GRPUPG",
-		"techCode": 1
 	},
 	"R-Struc-Power-Upgrade01": {
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-Power-Upgrade01",
 		"imdName": "blpower4.pie",
-		"keyTopic": 1,
 		"msgName": "RES_POWU1",
 		"name": "Gas Turbine Generator",
 		"requiredResearch": [
@@ -2589,7 +2415,6 @@
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-Power-Upgrade01b",
 		"imdName": "blpower4.pie",
-		"keyTopic": 1,
 		"name": "Gas Turbine Generator Mk2",
 		"requiredResearch": [
 			"R-Struc-Power-Upgrade01"
@@ -2610,7 +2435,6 @@
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-Power-Upgrade01c",
 		"imdName": "blpower4.pie",
-		"keyTopic": 1,
 		"name": "Gas Turbine Generator Mk3",
 		"requiredResearch": [
 			"R-Struc-Power-Upgrade01b"
@@ -2631,7 +2455,6 @@
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-Power-Upgrade02",
 		"imdName": "blpower4.pie",
-		"keyTopic": 1,
 		"msgName": "RES_POWU2",
 		"name": "Vapor Turbine Generator",
 		"requiredResearch": [
@@ -2653,7 +2476,6 @@
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-Power-Upgrade03",
 		"imdName": "blpower4.pie",
-		"keyTopic": 1,
 		"name": "Vapor Turbine Generator Mk2",
 		"requiredResearch": [
 			"R-Struc-Power-Upgrade02"
@@ -2674,7 +2496,6 @@
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-Power-Upgrade03a",
 		"imdName": "blpower4.pie",
-		"keyTopic": 1,
 		"name": "Vapor Turbine Generator Mk3",
 		"requiredResearch": [
 			"R-Struc-Power-Upgrade03"
@@ -2694,7 +2515,6 @@
 	"R-Struc-PowerModuleMk1": {
 		"iconID": "IMAGE_RES_POWERTECH",
 		"id": "R-Struc-PowerModuleMk1",
-		"keyTopic": 1,
 		"msgName": "RES_POWMD1",
 		"name": "Power Module",
 		"requiredResearch": [
@@ -2733,7 +2553,6 @@
 	"R-Struc-Research-Module": {
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-Research-Module",
-		"keyTopic": 1,
 		"msgName": "RES_ST_RM1",
 		"name": "Research Module",
 		"requiredResearch": [
@@ -2750,7 +2569,6 @@
 		"iconID": "IMAGE_RES_COMPUTERTECH",
 		"id": "R-Struc-Research-Upgrade01",
 		"imdName": "blresch4.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_ST_RU1",
 		"name": "Synaptic Link Data Analysis",
 		"requiredResearch": [
@@ -2811,7 +2629,6 @@
 		"iconID": "IMAGE_RES_COMPUTERTECH",
 		"id": "R-Struc-Research-Upgrade04",
 		"imdName": "blresch4.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_ST_RU4",
 		"name": "Dedicated Synaptic Link Data Analysis",
 		"requiredResearch": [
@@ -2872,7 +2689,6 @@
 		"iconID": "IMAGE_RES_COMPUTERTECH",
 		"id": "R-Struc-Research-Upgrade07",
 		"imdName": "blresch4.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_ST_RU7",
 		"name": "Neural Synapse Research Brain",
 		"requiredResearch": [
@@ -2945,6 +2761,27 @@
 				"class": "Building",
 				"parameter": "RepairPoints",
 				"value": 50
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "CyborgRepair",
+				"parameter": "RepairPoints",
+				"value": 50
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "HeavyRepair",
+				"parameter": "RepairPoints",
+				"value": 50
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "LightRepair1",
+				"parameter": "RepairPoints",
+				"value": 50
 			}
 		],
 		"statID": "A0RepairCentre3",
@@ -2965,7 +2802,28 @@
 			{
 				"class": "Building",
 				"parameter": "RepairPoints",
-				"value": 50
+				"value": 100
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "CyborgRepair",
+				"parameter": "RepairPoints",
+				"value": 100
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "HeavyRepair",
+				"parameter": "RepairPoints",
+				"value": 100
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "LightRepair1",
+				"parameter": "RepairPoints",
+				"value": 100
 			}
 		],
 		"statID": "A0RepairCentre3",
@@ -2985,7 +2843,28 @@
 			{
 				"class": "Building",
 				"parameter": "RepairPoints",
-				"value": 50
+				"value": 100
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "CyborgRepair",
+				"parameter": "RepairPoints",
+				"value": 100
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "HeavyRepair",
+				"parameter": "RepairPoints",
+				"value": 100
+			},
+			{
+				"class": "Repair",
+				"filterParameter": "Id",
+				"filterValue": "LightRepair1",
+				"parameter": "RepairPoints",
+				"value": 100
 			}
 		],
 		"statID": "A0RepairCentre3",
@@ -3027,7 +2906,6 @@
 	"R-Struc-VTOLPad-Upgrade01": {
 		"iconID": "IMAGE_RES_STRUCTURETECH",
 		"id": "R-Struc-VTOLPad-Upgrade01",
-		"keyTopic": 1,
 		"msgName": "RES_ST_VPU1",
 		"name": "Automated VTOL Rearming",
 		"requiredResearch": [
@@ -3151,7 +3029,6 @@
 		"disabledWhen": 4,
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-SuperTransport",
-		"keyTopic": 1,
 		"msgName": "RES_SUPERTRANS",
 		"name": "Super Transport",
 		"requiredResearch": [
@@ -3168,7 +3045,6 @@
 		"iconID": "IMAGE_RES_COMPUTERTECH",
 		"id": "R-Sys-Autorepair-General",
 		"imdName": "ICCCCONS.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_SY_AR",
 		"name": "Auto-Repair",
 		"replacedComponents": [
@@ -3193,8 +3069,8 @@
 			"R-Sys-CBSensor-Turret01",
 			"R-Sys-Sensor-Tower02"
 		],
-		"researchPoints": 3600,
-		"researchPower": 112,
+		"researchPoints": 1100,
+		"researchPower": 34,
 		"resultStructures": [
 			"Sys-CB-Tower01"
 		],
@@ -3220,14 +3096,10 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Engineering01",
 		"imdName": "trlcon.pie",
-		"keyTopic": 1,
 		"msgName": "RES_ENGIN1",
 		"name": "Engineering",
 		"researchPoints": 1200,
 		"researchPower": 37,
-		"resultComponents": [
-			"CyborgSpade"
-		],
 		"results": [
 			{
 				"class": "Construct",
@@ -3241,7 +3113,6 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Engineering02",
 		"imdName": "trlcon.pie",
-		"keyTopic": 1,
 		"msgName": "RES_ENGIN2",
 		"name": "Improved Engineering",
 		"requiredResearch": [
@@ -3254,7 +3125,7 @@
 			{
 				"class": "Construct",
 				"parameter": "ConstructorPoints",
-				"value": 20
+				"value": 30
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -3263,7 +3134,6 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Engineering03",
 		"imdName": "trlcon.pie",
-		"keyTopic": 1,
 		"msgName": "RES_ENGIN3",
 		"name": "Advanced Engineering",
 		"requiredResearch": [
@@ -3276,7 +3146,7 @@
 			{
 				"class": "Construct",
 				"parameter": "ConstructorPoints",
-				"value": 20
+				"value": 30
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -3304,10 +3174,10 @@
 		"name": "Heavy Repair Turret",
 		"requiredResearch": [
 			"R-Sys-MobileRepairTurret01",
-			"R-Struc-Factory-Cyborg"
+			"R-Struc-Factory-Module"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 2400,
+		"researchPower": 75,
 		"resultComponents": [
 			"HeavyRepair"
 		],
@@ -3335,14 +3205,13 @@
 		"iconID": "IMAGE_RES_COMPUTERTECH",
 		"id": "R-Sys-Resistance-Circuits",
 		"imdName": "ICCCCONS.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_SY_RC",
 		"name": "Nexus Resistance Circuits",
 		"requiredResearch": [
-			"R-Sys-Sensor-Upgrade03",
+			"R-Sys-SpyTurret",
 			"R-Struc-Research-Upgrade09"
 		],
-		"researchPoints": 28800,
+		"researchPoints": 18000,
 		"researchPower": 450,
 		"results": [
 			{
@@ -3380,7 +3249,6 @@
 	"R-Sys-Sensor-Tower02": {
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-Tower02",
-		"keyTopic": 1,
 		"msgName": "RES_SY_STW2",
 		"name": "Hardened Sensor Tower",
 		"redStructures": [
@@ -3390,8 +3258,8 @@
 			"R-Defense-HardcreteWall",
 			"R-Sys-Sensor-Tower01"
 		],
-		"researchPoints": 1200,
-		"researchPower": 37,
+		"researchPoints": 600,
+		"researchPower": 18,
 		"resultStructures": [
 			"Sys-SensoTower02"
 		],
@@ -3413,7 +3281,6 @@
 		"disabledWhen": 8,
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-UpLink",
-		"keyTopic": 1,
 		"msgName": "RES_SY_S_UP",
 		"name": "Satellite Uplink Center",
 		"requiredResearch": [
@@ -3431,7 +3298,6 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-Upgrade01",
 		"imdName": "GNLSNSR1.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_SY_SU1",
 		"name": "Sensor Upgrade",
 		"requiredResearch": [
@@ -3452,7 +3318,6 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-Upgrade02",
 		"imdName": "GNLSNSR1.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_SY_SU2",
 		"name": "Sensor Upgrade Mk2",
 		"requiredResearch": [
@@ -3474,7 +3339,6 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-Upgrade03",
 		"imdName": "GNLSNSR1.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_SY_SU3",
 		"name": "Sensor Upgrade Mk3",
 		"requiredResearch": [
@@ -3495,7 +3359,6 @@
 	"R-Sys-Sensor-WS": {
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-WS",
-		"keyTopic": 1,
 		"msgName": "RES_SY_S_WST",
 		"name": "Wide Spectrum Sensor",
 		"requiredResearch": [
@@ -3512,15 +3375,14 @@
 	"R-Sys-Sensor-WSTower": {
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Sensor-WSTower",
-		"keyTopic": 1,
 		"msgName": "RES_SY_S_WS",
 		"name": "Wide Spectrum Sensor Tower",
 		"requiredResearch": [
 			"R-Sys-Sensor-WS",
 			"R-Sys-Sensor-Tower02"
 		],
-		"researchPoints": 16400,
-		"researchPower": 450,
+		"researchPoints": 1400,
+		"researchPower": 43,
 		"resultStructures": [
 			"Sys-SensoTowerWS"
 		],
@@ -3529,11 +3391,11 @@
 	"R-Sys-Spade1Mk1": {
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-Spade1Mk1",
-		"keyTopic": 1,
 		"name": "Construction Unit",
 		"researchPoints": 10,
 		"resultComponents": [
-			"Spade1Mk1"
+			"Spade1Mk1",
+			"CyborgSpade"
 		],
 		"statID": "Spade1Mk1",
 		"techCode": 1
@@ -3542,13 +3404,12 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-SpyTower",
 		"imdName": "icmolql.pie",
-		"keyTopic": 1,
 		"name": "Nexus Link Tower",
 		"requiredResearch": [
 			"R-Sys-SpyTurret"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1400,
+		"researchPower": 43,
 		"resultStructures": [
 			"Sys-SpyTower"
 		],
@@ -3558,15 +3419,14 @@
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-SpyTurret",
 		"imdName": "icmolql.pie",
-		"keyTopic": 1,
 		"msgName": "RES_SY_SPT",
 		"name": "Nexus Link Turret",
 		"requiredResearch": [
 			"R-Sys-Sensor-Upgrade03",
-			"R-Struc-Research-Upgrade09"
+			"R-Comp-CommandTurret02"
 		],
-		"researchPoints": 14400,
-		"researchPower": 450,
+		"researchPoints": 12000,
+		"researchPower": 375,
 		"resultComponents": [
 			"SpyTurret01"
 		],
@@ -3575,15 +3435,14 @@
 	"R-Sys-VTOLCBS-Tower01": {
 		"iconID": "IMAGE_RES_SYSTEMTECH",
 		"id": "R-Sys-VTOLCBS-Tower01",
-		"keyTopic": 1,
 		"msgName": "RES_SY_VCBSTW1",
 		"name": "VTOL CB Tower",
 		"requiredResearch": [
 			"R-Sys-VTOLCBS-Turret01",
 			"R-Sys-Sensor-Tower02"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1300,
+		"researchPower": 40,
 		"resultStructures": [
 			"Sys-VTOL-CB-Tower01"
 		],
@@ -3615,8 +3474,8 @@
 			"R-Sys-VTOLStrike-Turret01",
 			"R-Sys-Sensor-Tower02"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 1200,
+		"researchPower": 37,
 		"resultStructures": [
 			"Sys-VTOL-RadarTower01"
 		],
@@ -3656,6 +3515,13 @@
 				"filterValue": "Droids",
 				"parameter": "Thermal",
 				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Thermal",
+				"value": 40
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -3675,6 +3541,13 @@
 				"class": "Body",
 				"filterParameter": "BodyClass",
 				"filterValue": "Droids",
+				"parameter": "Thermal",
+				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
 				"parameter": "Thermal",
 				"value": 40
 			}
@@ -3697,6 +3570,13 @@
 				"class": "Body",
 				"filterParameter": "BodyClass",
 				"filterValue": "Droids",
+				"parameter": "Thermal",
+				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
 				"parameter": "Thermal",
 				"value": 40
 			}
@@ -3723,6 +3603,13 @@
 				"filterValue": "Droids",
 				"parameter": "Thermal",
 				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Thermal",
+				"value": 40
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -3742,6 +3629,13 @@
 				"class": "Body",
 				"filterParameter": "BodyClass",
 				"filterValue": "Droids",
+				"parameter": "Thermal",
+				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
 				"parameter": "Thermal",
 				"value": 40
 			}
@@ -3764,6 +3658,13 @@
 				"class": "Body",
 				"filterParameter": "BodyClass",
 				"filterValue": "Droids",
+				"parameter": "Thermal",
+				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
 				"parameter": "Thermal",
 				"value": 40
 			}
@@ -3789,6 +3690,13 @@
 				"filterValue": "Droids",
 				"parameter": "Thermal",
 				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Thermal",
+				"value": 40
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -3808,6 +3716,13 @@
 				"class": "Body",
 				"filterParameter": "BodyClass",
 				"filterValue": "Droids",
+				"parameter": "Thermal",
+				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
 				"parameter": "Thermal",
 				"value": 40
 			}
@@ -3832,6 +3747,13 @@
 				"filterValue": "Droids",
 				"parameter": "Thermal",
 				"value": 40
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Thermal",
+				"value": 40
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -3852,14 +3774,13 @@
 	"R-Vehicle-Body02": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body02",
-		"keyTopic": 1,
 		"msgName": "RES_V_B02",
 		"name": "Light Body - Leopard",
 		"requiredResearch": [
-			"R-Vehicle-Metals04"
+			"R-Vehicle-Metals03"
 		],
-		"researchPoints": 6000,
-		"researchPower": 187,
+		"researchPoints": 2400,
+		"researchPower": 75,
 		"resultComponents": [
 			"Body2SUP"
 		],
@@ -3868,7 +3789,6 @@
 	"R-Vehicle-Body03": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body03",
-		"keyTopic": 1,
 		"msgName": "RES_V_B03",
 		"name": "Light Body - Retaliation",
 		"requiredResearch": [
@@ -3885,7 +3805,6 @@
 	"R-Vehicle-Body04": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body04",
-		"keyTopic": 1,
 		"msgName": "RES_V_B04",
 		"name": "Light Body - Bug",
 		"requiredResearch": [
@@ -3916,15 +3835,15 @@
 	"R-Vehicle-Body06": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body06",
-		"keyTopic": 1,
 		"msgName": "RES_V_B06",
 		"name": "Medium Body - Panther",
 		"requiredResearch": [
 			"R-Vehicle-Body02",
-			"R-Vehicle-Body05"
+			"R-Vehicle-Body05",
+			"R-Vehicle-Metals04"
 		],
-		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPoints": 4800,
+		"researchPower": 150,
 		"resultComponents": [
 			"Body6SUPP"
 		],
@@ -3950,7 +3869,6 @@
 	"R-Vehicle-Body08": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body08",
-		"keyTopic": 1,
 		"msgName": "RES_V_B08",
 		"name": "Medium Body - Scorpion",
 		"requiredResearch": [
@@ -3967,15 +3885,15 @@
 	"R-Vehicle-Body09": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body09",
-		"keyTopic": 1,
 		"msgName": "RES_V_B09",
 		"name": "Heavy Body - Tiger",
 		"requiredResearch": [
 			"R-Vehicle-Body11",
-			"R-Vehicle-Body06"
+			"R-Vehicle-Body06",
+			"R-Vehicle-Metals05"
 		],
-		"researchPoints": 8400,
-		"researchPower": 262,
+		"researchPoints": 10800,
+		"researchPower": 337,
 		"resultComponents": [
 			"Body9REC"
 		],
@@ -4017,7 +3935,6 @@
 	"R-Vehicle-Body12": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body12",
-		"keyTopic": 1,
 		"msgName": "RES_V_B12",
 		"name": "Heavy Body - Mantis",
 		"requiredResearch": [
@@ -4034,7 +3951,6 @@
 	"R-Vehicle-Body13": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body13",
-		"keyTopic": 1,
 		"msgName": "RES_V_B13",
 		"name": "Heavy Body - Wyvern",
 		"requiredResearch": [
@@ -4051,7 +3967,6 @@
 	"R-Vehicle-Body14": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Body14",
-		"keyTopic": 1,
 		"msgName": "RES_V_B14",
 		"name": "Multi Turret Body - Dragon",
 		"requiredResearch": [
@@ -4068,7 +3983,6 @@
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Engine01",
 		"imdName": "iceng.pie",
-		"keyTopic": 1,
 		"msgName": "RES_V_EN1",
 		"name": "Fuel Injection Engine",
 		"requiredResearch": [
@@ -4091,7 +4005,6 @@
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Engine02",
 		"imdName": "iceng.pie",
-		"keyTopic": 1,
 		"name": "Fuel Injection Engine Mk2",
 		"requiredResearch": [
 			"R-Vehicle-Engine01"
@@ -4114,7 +4027,6 @@
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Engine03",
 		"imdName": "iceng.pie",
-		"keyTopic": 1,
 		"name": "Fuel Injection Engine Mk3",
 		"requiredResearch": [
 			"R-Vehicle-Engine02"
@@ -4274,7 +4186,6 @@
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Metals01",
 		"imdName": "icmolql.pie",
-		"keyTopic": 1,
 		"msgName": "RES_V_MET1",
 		"name": "Composite Alloys",
 		"requiredResearch": [
@@ -4297,6 +4208,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -4325,6 +4250,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -4334,7 +4273,6 @@
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Metals03",
 		"imdName": "icmolql.pie",
-		"keyTopic": 1,
 		"name": "Composite Alloys Mk3",
 		"requiredResearch": [
 			"R-Vehicle-Metals02"
@@ -4355,6 +4293,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -4386,6 +4338,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -4414,6 +4380,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -4443,6 +4423,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -4474,6 +4468,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG"
@@ -4502,6 +4510,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -4531,6 +4553,20 @@
 				"filterValue": "Droids",
 				"parameter": "HitPointPct",
 				"value": 30
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "Armour",
+				"value": 15
+			},
+			{
+				"class": "Body",
+				"filterParameter": "BodyClass",
+				"filterValue": "Transports",
+				"parameter": "HitPointPct",
+				"value": 15
 			}
 		],
 		"subgroupIconID": "IMAGE_RES_GRPUPG",
@@ -4539,7 +4575,6 @@
 	"R-Vehicle-Prop-Halftracks": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Prop-Halftracks",
-		"keyTopic": 1,
 		"msgName": "RES_HALFT1",
 		"name": "Half-tracked Propulsion",
 		"requiredResearch": [
@@ -4555,7 +4590,6 @@
 	"R-Vehicle-Prop-Hover": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Prop-Hover",
-		"keyTopic": 1,
 		"msgName": "RES_V_P_H1",
 		"name": "Hover Propulsion",
 		"requiredResearch": [
@@ -4572,7 +4606,6 @@
 	"R-Vehicle-Prop-Tracks": {
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Prop-Tracks",
-		"keyTopic": 1,
 		"msgName": "RES_TRACK1",
 		"name": "Tracked Propulsion",
 		"requiredResearch": [
@@ -4590,7 +4623,6 @@
 		"iconID": "IMAGE_RES_DROIDTECH",
 		"id": "R-Vehicle-Prop-VTOL",
 		"imdName": "DPVTOL.PIE",
-		"keyTopic": 1,
 		"msgName": "RES_V_P_V1",
 		"name": "VTOL Propulsion",
 		"requiredResearch": [
@@ -4614,454 +4646,10 @@
 		],
 		"statID": "wheeled01"
 	},
-	"R-Wpn-AAGun-Accuracy01": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Accuracy01",
-		"msgName": "RES_W_AAAC1",
-		"name": "AA Thermal Imaging Sensor",
-		"requiredResearch": [
-			"R-Wpn-AAGun03",
-			"R-Wpn-RocketSlow-Accuracy02"
-		],
-		"researchPoints": 6000,
-		"researchPower": 187,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "HitChance",
-				"value": 10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ShortHitChance",
-				"value": 10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPACC"
-	},
-	"R-Wpn-AAGun-Accuracy02": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Accuracy02",
-		"msgName": "RES_W_AAAC2",
-		"name": "AA Target Acquisition Shells",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Accuracy01",
-			"R-Wpn-Howitzer-Accuracy01"
-		],
-		"researchPoints": 7200,
-		"researchPower": 225,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "HitChance",
-				"value": 10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ShortHitChance",
-				"value": 10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPACC"
-	},
-	"R-Wpn-AAGun-Accuracy03": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Accuracy03",
-		"msgName": "RES_W_AAAC3",
-		"name": "AA Target Prediction Computer",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Accuracy02",
-			"R-Struc-Research-Upgrade06"
-		],
-		"researchPoints": 8400,
-		"researchPower": 262,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "HitChance",
-				"value": 10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ShortHitChance",
-				"value": 10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPACC"
-	},
-	"R-Wpn-AAGun-Damage01": {
-		"disabledWhen": 4,
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Damage01",
-		"msgName": "RES_W_AAD1",
-		"name": "AA HE Flak",
-		"requiredResearch": [
-			"R-Wpn-AAGun03"
-		],
-		"researchPoints": 6000,
-		"researchPower": 187,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "Damage",
-				"value": 25
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "RadiusDamage",
-				"value": 25
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPDAM"
-	},
-	"R-Wpn-AAGun-Damage02": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Damage02",
-		"name": "AA HE Flak Mk2",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Damage01"
-		],
-		"researchPoints": 7200,
-		"researchPower": 225,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "Damage",
-				"value": 25
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "RadiusDamage",
-				"value": 25
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPDAM",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-Damage03": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Damage03",
-		"name": "AA HE Flak Mk3",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Damage02"
-		],
-		"researchPoints": 8400,
-		"researchPower": 262,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "Damage",
-				"value": 25
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "RadiusDamage",
-				"value": 25
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPDAM",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-Damage04": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Damage04",
-		"msgName": "RES_W_AAD4",
-		"name": "AA HEAP Flak",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Damage03",
-			"R-Wpn-Cannon-Damage07"
-		],
-		"researchPoints": 9600,
-		"researchPower": 300,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "Damage",
-				"value": 25
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "RadiusDamage",
-				"value": 25
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPDAM"
-	},
-	"R-Wpn-AAGun-Damage05": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Damage05",
-		"name": "AA HEAP Flak Mk2",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Damage04"
-		],
-		"researchPoints": 10800,
-		"researchPower": 337,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "Damage",
-				"value": 25
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "RadiusDamage",
-				"value": 25
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPDAM",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-Damage06": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-Damage06",
-		"name": "AA HEAP Flak Mk3",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Damage05"
-		],
-		"researchPoints": 12000,
-		"researchPower": 375,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "Damage",
-				"value": 25
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "RadiusDamage",
-				"value": 25
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPDAM",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-ROF01": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-ROF01",
-		"msgName": "RES_W_AAROF1",
-		"name": "AA Ammunition Hopper",
-		"requiredResearch": [
-			"R-Wpn-AAGun-Damage01",
-			"R-Wpn-MG-ROF01"
-		],
-		"researchPoints": 3600,
-		"researchPower": 112,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "FirePause",
-				"value": -10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ReloadTime",
-				"value": -10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPROF"
-	},
-	"R-Wpn-AAGun-ROF02": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-ROF02",
-		"name": "AA Ammunition Hopper Mk2",
-		"requiredResearch": [
-			"R-Wpn-AAGun-ROF01"
-		],
-		"researchPoints": 4800,
-		"researchPower": 150,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "FirePause",
-				"value": -10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ReloadTime",
-				"value": -10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPROF",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-ROF03": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-ROF03",
-		"name": "AA Ammunition Hopper Mk3",
-		"requiredResearch": [
-			"R-Wpn-AAGun04",
-			"R-Wpn-AAGun-ROF02"
-		],
-		"researchPoints": 6000,
-		"researchPower": 187,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "FirePause",
-				"value": -10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ReloadTime",
-				"value": -10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPROF",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-ROF04": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-ROF04",
-		"msgName": "RES_W_AAROF4",
-		"name": "AA Chainfeed Loader",
-		"requiredResearch": [
-			"R-Wpn-AAGun-ROF03",
-			"R-Wpn-Cannon-ROF04"
-		],
-		"researchPoints": 8000,
-		"researchPower": 250,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "FirePause",
-				"value": -10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ReloadTime",
-				"value": -10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPROF"
-	},
-	"R-Wpn-AAGun-ROF05": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-ROF05",
-		"name": "AA Chainfeed Loader Mk2",
-		"requiredResearch": [
-			"R-Wpn-AAGun-ROF04"
-		],
-		"researchPoints": 10000,
-		"researchPower": 312,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "FirePause",
-				"value": -10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ReloadTime",
-				"value": -10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPROF",
-		"techCode": 1
-	},
-	"R-Wpn-AAGun-ROF06": {
-		"iconID": "IMAGE_RES_WEAPONTECH",
-		"id": "R-Wpn-AAGun-ROF06",
-		"name": "AA Chainfeed Loader Mk3",
-		"requiredResearch": [
-			"R-Wpn-AAGun-ROF05"
-		],
-		"researchPoints": 12000,
-		"researchPower": 375,
-		"results": [
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "FirePause",
-				"value": -10
-			},
-			{
-				"class": "Weapon",
-				"filterParameter": "ImpactClass",
-				"filterValue": "A-A GUN",
-				"parameter": "ReloadTime",
-				"value": -10
-			}
-		],
-		"statID": "QuadMg1AAGun",
-		"subgroupIconID": "IMAGE_RES_GRPROF",
-		"techCode": 1
-	},
 	"R-Wpn-AAGun01": {
 		"disabledWhen": 4,
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-AAGun01",
-		"keyTopic": 1,
 		"msgName": "RES_W_AA1",
 		"name": "AA Cyclone Flak Cannon",
 		"requiredResearch": [
@@ -5078,7 +4666,6 @@
 		"disabledWhen": 4,
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-AAGun02",
-		"keyTopic": 1,
 		"msgName": "RES_W_AA2",
 		"name": "AA Tornado Flak Cannon",
 		"redComponents": [
@@ -5100,11 +4687,10 @@
 		"disabledWhen": 4,
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-AAGun03",
-		"keyTopic": 1,
 		"msgName": "RES_W_AA3",
 		"name": "Hurricane AA Turret",
 		"requiredResearch": [
-			"R-Wpn-MG2Mk1"
+			"R-Wpn-MG-ROF02"
 		],
 		"researchPoints": 3600,
 		"researchPower": 112,
@@ -5122,11 +4708,12 @@
 			"QuadMg1AAGun"
 		],
 		"requiredResearch": [
-			"R-Wpn-MG4",
-			"R-Wpn-AAGun-Damage02"
+			"R-Wpn-MG-ROF03",
+			"R-Wpn-AAGun03",
+			"R-Struc-Research-Upgrade06"
 		],
-		"researchPoints": 9700,
-		"researchPower": 303,
+		"researchPoints": 10800,
+		"researchPower": 337,
 		"resultComponents": [
 			"QuadRotAAGun"
 		],
@@ -5135,7 +4722,7 @@
 	"R-Wpn-AALaser": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-AALaser",
-		"msgName": "RES_W_MS_HvSAM1",
+		"msgName": "RES_W_AALAS",
 		"name": "Stormbringer AA Laser",
 		"requiredResearch": [
 			"R-Wpn-Energy-ROF01"
@@ -5353,11 +4940,11 @@
 		"msgName": "RES_W_BMB6",
 		"name": "EMP Missile Launcher",
 		"requiredResearch": [
-			"R-Wpn-EMPCannon",
-			"R-Wpn-Bomb04"
+			"R-Comp-CommandTurret02",
+			"R-Wpn-Bomb-Damage03"
 		],
-		"researchPoints": 25000,
-		"researchPower": 450,
+		"researchPoints": 8000,
+		"researchPower": 250,
 		"resultComponents": [
 			"Bomb6-VTOL-EMP"
 		],
@@ -5396,7 +4983,6 @@
 	"R-Wpn-Cannon-Accuracy02": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon-Accuracy02",
-		"keyTopic": 1,
 		"msgName": "RES_W_CNAC2",
 		"name": "Cannon Laser Designator",
 		"requiredResearch": [
@@ -5460,8 +5046,8 @@
 		"requiredResearch": [
 			"R-Wpn-Cannon-Damage01"
 		],
-		"researchPoints": 2425,
-		"researchPower": 75,
+		"researchPoints": 2450,
+		"researchPower": 76,
 		"results": [
 			{
 				"class": "Weapon",
@@ -5776,7 +5362,6 @@
 	"R-Wpn-Cannon-ROF04": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon-ROF04",
-		"keyTopic": 1,
 		"msgName": "RES_W_CN_ROF4",
 		"name": "Cannon Rapid Loader",
 		"requiredResearch": [
@@ -5865,7 +5450,6 @@
 	"R-Wpn-Cannon1Mk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon1Mk1",
-		"keyTopic": 1,
 		"msgName": "RES_CN1MK1",
 		"name": "Light Cannon",
 		"requiredResearch": [
@@ -5899,7 +5483,6 @@
 	"R-Wpn-Cannon3Mk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon3Mk1",
-		"keyTopic": 1,
 		"msgName": "RES_CN3MK1",
 		"name": "Heavy Cannon",
 		"redComponents": [
@@ -5920,7 +5503,6 @@
 	"R-Wpn-Cannon4AMk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon4AMk1",
-		"keyTopic": 1,
 		"msgName": "RES_W_CN_4A",
 		"name": "Hyper Velocity Cannon",
 		"redComponents": [
@@ -5941,14 +5523,13 @@
 	"R-Wpn-Cannon5": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon5",
-		"keyTopic": 1,
 		"msgName": "RES_W_CN5",
 		"name": "Assault Cannon",
 		"requiredResearch": [
 			"R-Wpn-Cannon-ROF01"
 		],
-		"researchPoints": 8000,
-		"researchPower": 250,
+		"researchPoints": 4800,
+		"researchPower": 150,
 		"resultComponents": [
 			"Cannon5VulcanMk1",
 			"Cannon5Vulcan-VTOL"
@@ -5958,7 +5539,6 @@
 	"R-Wpn-Cannon6TwinAslt": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Cannon6TwinAslt",
-		"keyTopic": 1,
 		"msgName": "RES_W_CN6_T_A",
 		"name": "Twin Assault Cannon",
 		"redComponents": [
@@ -5966,10 +5546,10 @@
 		],
 		"requiredResearch": [
 			"R-Wpn-Cannon5",
-			"R-Struc-Research-Upgrade05"
+			"R-Struc-Research-Upgrade06"
 		],
-		"researchPoints": 9600,
-		"researchPower": 300,
+		"researchPoints": 7050,
+		"researchPower": 225,
 		"resultComponents": [
 			"Cannon6TwinAslt"
 		],
@@ -5981,7 +5561,7 @@
 		"msgName": "RES_EMP_CANT",
 		"name": "EMP Cannon",
 		"requiredResearch": [
-			"R-Sys-Sensor-Upgrade03",
+			"R-Comp-CommandTurret02",
 			"R-Struc-Research-Upgrade08"
 		],
 		"researchPoints": 14400,
@@ -6026,7 +5606,7 @@
 		"msgName": "RES_LASD1",
 		"name": "Hi-Energy Laser Emitter",
 		"requiredResearch": [
-			"R-Wpn-Energy-Accuracy01"
+			"R-Wpn-Laser01"
 		],
 		"researchPoints": 14400,
 		"researchPower": 450,
@@ -6197,7 +5777,6 @@
 	"R-Wpn-Flame2": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Flame2",
-		"keyTopic": 1,
 		"msgName": "RES_FLAME2",
 		"name": "Heavy Flamer - Inferno",
 		"redComponents": [
@@ -6218,7 +5797,6 @@
 	"R-Wpn-Flamer-Damage01": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Flamer-Damage01",
-		"keyTopic": 1,
 		"msgName": "RES_W_FL_D1",
 		"name": "High Temperature Flamer Gel",
 		"requiredResearch": [
@@ -6510,7 +6088,6 @@
 	"R-Wpn-Flamer-ROF02": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Flamer-ROF02",
-		"keyTopic": 1,
 		"name": "Flamer Autoloader Mk2",
 		"requiredResearch": [
 			"R-Wpn-Flame2",
@@ -6570,7 +6147,6 @@
 	"R-Wpn-Flamer01Mk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Flamer01Mk1",
-		"keyTopic": 1,
 		"msgName": "RES_FLAME1",
 		"name": "Flamer",
 		"requiredResearch": [
@@ -6587,7 +6163,6 @@
 	"R-Wpn-HeavyPlasmaLauncher": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-HeavyPlasmaLauncher",
-		"keyTopic": 1,
 		"msgName": "RES_W_PLASLAUNCH",
 		"name": "Heavy Plasma Launcher",
 		"requiredResearch": [
@@ -6604,7 +6179,6 @@
 	"R-Wpn-Howitzer-Accuracy01": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Howitzer-Accuracy01",
-		"keyTopic": 1,
 		"msgName": "RES_W_HOWAC1",
 		"name": "Target Acquisition Artillery Shells",
 		"requiredResearch": [
@@ -6909,7 +6483,6 @@
 	"R-Wpn-Howitzer-Incendiary": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Howitzer-Incendiary",
-		"keyTopic": 1,
 		"msgName": "RES_W_INH",
 		"name": "Incendiary Howitzer",
 		"requiredResearch": [
@@ -7042,7 +6615,6 @@
 	"R-Wpn-Howitzer03-Rot": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Howitzer03-Rot",
-		"keyTopic": 1,
 		"msgName": "RES_W_RHOW",
 		"name": "Rotary Howitzer - Hellstorm",
 		"redComponents": [
@@ -7062,15 +6634,15 @@
 	"R-Wpn-HowitzerMk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-HowitzerMk1",
-		"keyTopic": 1,
 		"msgName": "RES_W_HMK1",
 		"name": "Howitzer",
 		"requiredResearch": [
 			"R-Wpn-Mortar-Damage04",
-			"R-Sys-Sensor-Upgrade01"
+			"R-Sys-Sensor-Upgrade01",
+			"R-Struc-Research-Upgrade06"
 		],
-		"researchPoints": 9000,
-		"researchPower": 281,
+		"researchPoints": 9640,
+		"researchPower": 300,
 		"resultComponents": [
 			"Howitzer105Mk1"
 		],
@@ -7079,7 +6651,6 @@
 	"R-Wpn-HvArtMissile": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-HvArtMissile",
-		"keyTopic": 1,
 		"msgName": "RES_W_MS_HART",
 		"name": "Archangel Missile",
 		"redComponents": [
@@ -7100,7 +6671,6 @@
 	"R-Wpn-HvyHowitzer": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-HvyHowitzer",
-		"keyTopic": 1,
 		"msgName": "RES_W_HH1",
 		"name": "Heavy Howitzer - Ground Shaker",
 		"requiredResearch": [
@@ -7117,11 +6687,10 @@
 	"R-Wpn-HvyLaser": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-HvyLaser",
-		"keyTopic": 1,
 		"msgName": "RES_W_HLAS",
 		"name": "Heavy Laser",
 		"requiredResearch": [
-			"R-Wpn-Energy-Damage01"
+			"R-Wpn-Laser02"
 		],
 		"researchPoints": 36000,
 		"researchPower": 450,
@@ -7135,7 +6704,6 @@
 		"disabledWhen": 16,
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-LasSat",
-		"keyTopic": 1,
 		"msgName": "RES_W_LASSAT",
 		"name": "Laser Satellite Command Post",
 		"requiredResearch": [
@@ -7152,7 +6720,6 @@
 	"R-Wpn-Laser01": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Laser01",
-		"keyTopic": 1,
 		"msgName": "RES_W_LAS1",
 		"name": "Laser - Flashlight",
 		"requiredResearch": [
@@ -7171,7 +6738,6 @@
 	"R-Wpn-Laser02": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Laser02",
-		"keyTopic": 1,
 		"msgName": "RES_W_LAS2",
 		"name": "Pulse Laser",
 		"redComponents": [
@@ -7179,8 +6745,7 @@
 			"Laser3BEAMMk1"
 		],
 		"requiredResearch": [
-			"R-Wpn-Laser01",
-			"R-Sys-Sensor-Upgrade03"
+			"R-Wpn-Laser01"
 		],
 		"researchPoints": 28800,
 		"researchPower": 450,
@@ -7193,7 +6758,6 @@
 	"R-Wpn-MG-Damage01": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG-Damage01",
-		"keyTopic": 1,
 		"msgName": "RES_W_MG_D1",
 		"name": "Hardened MG Bullets",
 		"requiredResearch": [
@@ -7207,6 +6771,20 @@
 				"filterParameter": "ImpactClass",
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
 				"value": 25
 			}
 		],
@@ -7230,6 +6808,20 @@
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
 				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
+				"value": 25
 			}
 		],
 		"statID": "MG1Mk1",
@@ -7251,6 +6843,20 @@
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
 				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
+				"value": 25
 			}
 		],
 		"statID": "MG1Mk1",
@@ -7264,7 +6870,7 @@
 		"requiredResearch": [
 			"R-Wpn-MG-Damage03"
 		],
-		"researchPoints": 7200,
+		"researchPoints": 6000,
 		"researchPower": 225,
 		"results": [
 			{
@@ -7272,6 +6878,20 @@
 				"filterParameter": "ImpactClass",
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
 				"value": 25
 			}
 		],
@@ -7284,17 +6904,30 @@
 		"id": "R-Wpn-MG-Damage05",
 		"name": "Tungsten-Tipped MG Bullets",
 		"requiredResearch": [
-			"R-Wpn-MG-Damage04",
-			"R-Wpn-MG-ROF01"
+			"R-Wpn-MG-Damage04"
 		],
 		"researchPoints": 7200,
-		"researchPower": 225,
+		"researchPower": 287,
 		"results": [
 			{
 				"class": "Weapon",
 				"filterParameter": "ImpactClass",
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
 				"value": 25
 			}
 		],
@@ -7309,14 +6942,28 @@
 		"requiredResearch": [
 			"R-Wpn-MG-Damage05"
 		],
-		"researchPoints": 9000,
-		"researchPower": 281,
+		"researchPoints": 7800,
+		"researchPower": 350,
 		"results": [
 			{
 				"class": "Weapon",
 				"filterParameter": "ImpactClass",
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
 				"value": 25
 			}
 		],
@@ -7331,14 +6978,28 @@
 		"requiredResearch": [
 			"R-Wpn-MG-Damage06"
 		],
-		"researchPoints": 10000,
-		"researchPower": 312,
+		"researchPoints": 8800,
+		"researchPower": 412,
 		"results": [
 			{
 				"class": "Weapon",
 				"filterParameter": "ImpactClass",
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
 				"value": 25
 			}
 		],
@@ -7352,10 +7013,10 @@
 		"name": "Depleted Uranium MG Bullets",
 		"requiredResearch": [
 			"R-Wpn-MG-Damage07",
-			"R-Struc-Research-Upgrade07"
+			"R-Struc-Research-Upgrade06"
 		],
-		"researchPoints": 11000,
-		"researchPower": 343,
+		"researchPoints": 9800,
+		"researchPower": 450,
 		"results": [
 			{
 				"class": "Weapon",
@@ -7363,6 +7024,94 @@
 				"filterValue": "MACHINE GUN",
 				"parameter": "Damage",
 				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
+				"value": 25
+			}
+		],
+		"statID": "MG1Mk1",
+		"subgroupIconID": "IMAGE_RES_GRPDAM",
+		"techCode": 1
+	},
+	"R-Wpn-MG-Damage09": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-MG-Damage09",
+		"name": "Depleted Uranium MG Bullets Mk2",
+		"requiredResearch": [
+			"R-Wpn-MG-Damage08",
+			"R-Struc-Research-Upgrade07"
+		],
+		"researchPoints": 10200,
+		"researchPower": 450,
+		"results": [
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "MACHINE GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 5
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
+				"value": 5
+			}
+		],
+		"statID": "MG1Mk1",
+		"subgroupIconID": "IMAGE_RES_GRPDAM",
+		"techCode": 1
+	},
+	"R-Wpn-MG-Damage10": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-MG-Damage10",
+		"name": "Depleted Uranium MG Bullets Mk3",
+		"requiredResearch": [
+			"R-Wpn-MG-Damage09",
+			"R-Struc-Research-Upgrade08"
+		],
+		"researchPoints": 11800,
+		"researchPower": 450,
+		"results": [
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "MACHINE GUN",
+				"parameter": "Damage",
+				"value": 25
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "Damage",
+				"value": 5
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "RadiusDamage",
+				"value": 5
 			}
 		],
 		"statID": "MG1Mk1",
@@ -7394,6 +7143,20 @@
 				"filterValue": "MACHINE GUN",
 				"parameter": "ReloadTime",
 				"value": -20
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "FirePause",
+				"value": -20
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "ReloadTime",
+				"value": -20
 			}
 		],
 		"statID": "MG1Mk1",
@@ -7423,6 +7186,20 @@
 				"filterValue": "MACHINE GUN",
 				"parameter": "ReloadTime",
 				"value": -18
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "FirePause",
+				"value": -18
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "ReloadTime",
+				"value": -18
 			}
 		],
 		"statID": "MG1Mk1",
@@ -7431,11 +7208,10 @@
 	"R-Wpn-MG-ROF03": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG-ROF03",
-		"keyTopic": 1,
 		"msgName": "RES_W_MG_ROF3",
 		"name": "Hyper Fire Chaingun Upgrade",
 		"requiredResearch": [
-			"R-Wpn-MG-ROF02"
+			"R-Wpn-MG4"
 		],
 		"researchPoints": 6000,
 		"researchPower": 187,
@@ -7453,6 +7229,20 @@
 				"filterValue": "MACHINE GUN",
 				"parameter": "ReloadTime",
 				"value": -8
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "FirePause",
+				"value": -8
+			},
+			{
+				"class": "Weapon",
+				"filterParameter": "ImpactClass",
+				"filterValue": "A-A GUN",
+				"parameter": "ReloadTime",
+				"value": -8
 			}
 		],
 		"statID": "MG1Mk1",
@@ -7461,7 +7251,6 @@
 	"R-Wpn-MG1Mk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG1Mk1",
-		"keyTopic": 1,
 		"msgName": "RES_MG1MK1",
 		"name": "Machinegun",
 		"researchPoints": 60,
@@ -7476,7 +7265,6 @@
 	"R-Wpn-MG2Mk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG2Mk1",
-		"keyTopic": 1,
 		"msgName": "RES_MG2MK1",
 		"name": "Twin Machinegun",
 		"requiredResearch": [
@@ -7497,7 +7285,6 @@
 	"R-Wpn-MG3Mk1": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG3Mk1",
-		"keyTopic": 1,
 		"msgName": "RES_MG3MK1",
 		"name": "Heavy Machinegun",
 		"requiredResearch": [
@@ -7518,7 +7305,6 @@
 	"R-Wpn-MG4": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG4",
-		"keyTopic": 1,
 		"msgName": "RES_W_MG4",
 		"name": "Assault Gun",
 		"redComponents": [
@@ -7528,10 +7314,10 @@
 		],
 		"requiredResearch": [
 			"R-Wpn-MG3Mk1",
-			"R-Wpn-MG-ROF03"
+			"R-Wpn-MG-ROF02"
 		],
-		"researchPoints": 4800,
-		"researchPower": 150,
+		"researchPoints": 6000,
+		"researchPower": 187,
 		"resultComponents": [
 			"CyborgRotMG",
 			"MG4ROTARY-VTOL",
@@ -7542,7 +7328,6 @@
 	"R-Wpn-MG5": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MG5",
-		"keyTopic": 1,
 		"msgName": "RES_WT_TWINAGUN",
 		"name": "Twin Assault Gun",
 		"redComponents": [
@@ -7552,8 +7337,8 @@
 			"R-Struc-Research-Upgrade06",
 			"R-Wpn-MG4"
 		],
-		"researchPoints": 9000,
-		"researchPower": 281,
+		"researchPoints": 7200,
+		"researchPower": 225,
 		"resultComponents": [
 			"MG5TWINROTARY"
 		],
@@ -7562,17 +7347,17 @@
 	"R-Wpn-MdArtMissile": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-MdArtMissile",
-		"keyTopic": 1,
 		"msgName": "RES_W_MS_MART",
 		"name": "Seraph Missile Array",
 		"redComponents": [
-			"Rocket-MRL"
+			"Rocket-MRL",
+			"Rocket-MRL-Hvy"
 		],
 		"requiredResearch": [
 			"R-Wpn-Missile2A-T",
 			"R-Wpn-Rocket02-MRL"
 		],
-		"researchPoints": 14400,
+		"researchPoints": 28800,
 		"researchPower": 450,
 		"resultComponents": [
 			"Missile-MdArt"
@@ -7747,7 +7532,6 @@
 		"disabledWhen": 4,
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Missile-LtSAM",
-		"keyTopic": 1,
 		"msgName": "RES_W_MS_LtSAM1",
 		"name": "Avenger SAM",
 		"requiredResearch": [
@@ -7935,7 +7719,6 @@
 	"R-Wpn-Mortar-Acc03": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Mortar-Acc03",
-		"keyTopic": 1,
 		"msgName": "RES_W_M_AC3",
 		"name": "Target Acquisition Mortar Shells",
 		"requiredResearch": [
@@ -8181,7 +7964,6 @@
 	"R-Wpn-Mortar-Incendiary": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Mortar-Incendiary",
-		"keyTopic": 1,
 		"msgName": "RES_IMORT",
 		"name": "Incendiary Mortar",
 		"requiredResearch": [
@@ -8315,12 +8097,10 @@
 	"R-Wpn-Mortar01Lt": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Mortar01Lt",
-		"keyTopic": 1,
 		"msgName": "RES_MORTA1",
 		"name": "Mortar",
 		"requiredResearch": [
-			"R-Wpn-Cannon-Damage01",
-			"R-Struc-Factory-Module"
+			"R-Wpn-Cannon-Damage01"
 		],
 		"researchPoints": 2400,
 		"researchPower": 75,
@@ -8349,7 +8129,6 @@
 	"R-Wpn-Mortar3": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Mortar3",
-		"keyTopic": 1,
 		"msgName": "RES_W_M3",
 		"name": "Rotary Mortar - Pepperpot",
 		"redComponents": [
@@ -8372,7 +8151,9 @@
 		"msgName": "RES_W_M2",
 		"name": "EMP Mortar",
 		"requiredResearch": [
-			"R-Wpn-EMPCannon"
+			"R-Comp-CommandTurret02",
+			"R-Sys-Sensor-Upgrade03",
+			"R-Struc-Research-Upgrade09"
 		],
 		"researchPoints": 14400,
 		"researchPower": 450,
@@ -8384,7 +8165,6 @@
 	"R-Wpn-PlasmaCannon": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-PlasmaCannon",
-		"keyTopic": 1,
 		"msgName": "RES_W_PLASCAN",
 		"name": "Plasma Cannon",
 		"requiredResearch": [
@@ -8402,7 +8182,6 @@
 	"R-Wpn-Plasmite-Flamer": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Plasmite-Flamer",
-		"keyTopic": 1,
 		"msgName": "RES_PLFL",
 		"name": "Plasmite Flamer",
 		"redComponents": [
@@ -8625,7 +8404,6 @@
 	"R-Wpn-RailGun01": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-RailGun01",
-		"keyTopic": 1,
 		"msgName": "RES_W_RAIL1",
 		"name": "Needle Gun",
 		"redComponents": [
@@ -8636,7 +8414,8 @@
 		"requiredResearch": [
 			"R-Wpn-Cannon4AMk1",
 			"R-Struc-Research-Upgrade07",
-			"R-Wpn-Cannon-Damage07"
+			"R-Wpn-Cannon-Damage07",
+			"R-Wpn-Cannon-Accuracy02"
 		],
 		"researchPoints": 14400,
 		"researchPower": 450,
@@ -8650,7 +8429,6 @@
 	"R-Wpn-RailGun02": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-RailGun02",
-		"keyTopic": 1,
 		"msgName": "RES_W_RAIL2",
 		"name": "Rail Gun",
 		"redComponents": [
@@ -8671,14 +8449,13 @@
 	"R-Wpn-RailGun03": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-RailGun03",
-		"keyTopic": 1,
 		"msgName": "RES_W_RAIL3",
 		"name": "Gauss Cannon",
 		"redComponents": [
 			"RailGun2Mk1"
 		],
 		"requiredResearch": [
-			"R-Wpn-Rail-Damage03"
+			"R-Wpn-RailGun02"
 		],
 		"researchPoints": 43200,
 		"researchPower": 450,
@@ -8723,7 +8500,7 @@
 		"name": "Improved Rocket Wire Guidance",
 		"requiredResearch": [
 			"R-Wpn-Rocket-Damage04",
-			"R-Struc-Research-Upgrade02"
+			"R-Wpn-Rocket-Accuracy01"
 		],
 		"researchPoints": 4800,
 		"researchPower": 150,
@@ -9107,8 +8884,7 @@
 			"Rocket-VTOL-Pod"
 		],
 		"requiredResearch": [
-			"R-Wpn-Rocket-Damage03",
-			"R-Wpn-Rocket-Accuracy01"
+			"R-Wpn-Rocket-Damage03"
 		],
 		"researchPoints": 3600,
 		"researchPower": 112,
@@ -9122,7 +8898,6 @@
 	"R-Wpn-Rocket02-MRL": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Rocket02-MRL",
-		"keyTopic": 1,
 		"msgName": "RES_W_RK_MRL1",
 		"name": "Mini-Rocket Array",
 		"requiredResearch": [
@@ -9134,6 +8909,24 @@
 			"Rocket-MRL"
 		],
 		"statID": "Rocket-MRL"
+	},
+	"R-Wpn-Rocket02-MRLHvy": {
+		"iconID": "IMAGE_RES_WEAPONTECH",
+		"id": "R-Wpn-Rocket02-MRLHvy",
+		"name": "Heavy Rocket Array",
+		"redComponents": [
+			"Rocket-MRL"
+		],
+		"requiredResearch": [
+			"R-Wpn-Rocket-Damage05",
+			"R-Wpn-Rocket02-MRL"
+		],
+		"researchPoints": 6000,
+		"researchPower": 187,
+		"resultComponents": [
+			"Rocket-MRL-Hvy"
+		],
+		"statID": "Rocket-MRL-Hvy"
 	},
 	"R-Wpn-Rocket03-HvAT": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
@@ -9155,7 +8948,6 @@
 	"R-Wpn-Rocket05-MiniPod": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Rocket05-MiniPod",
-		"keyTopic": 1,
 		"msgName": "RES_W_RK_MP1",
 		"name": "Mini-Rocket Pod",
 		"requiredResearch": [
@@ -9172,7 +8964,6 @@
 	"R-Wpn-Rocket06-IDF": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Rocket06-IDF",
-		"keyTopic": 1,
 		"msgName": "RES_W_RK_IDF",
 		"name": "Ripple Rockets",
 		"requiredResearch": [
@@ -9189,7 +8980,6 @@
 	"R-Wpn-Rocket07-Tank-Killer": {
 		"iconID": "IMAGE_RES_WEAPONTECH",
 		"id": "R-Wpn-Rocket07-Tank-Killer",
-		"keyTopic": 1,
 		"msgName": "RES_W_RK_HvAT",
 		"name": "Tank Killer Rocket",
 		"requiredResearch": [

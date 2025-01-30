@@ -32,6 +32,8 @@
 #include "visibility.h"
 #include "baseobject.h"
 
+#include <nonstd/optional.hpp>
+
 // how long to wait between CALL_STRUCT_ATTACKED's - plus how long to flash on radar for
 #define ATTACK_CB_PAUSE		5000
 
@@ -82,6 +84,8 @@ bool structureExists(int player, STRUCTURE_TYPE type, bool built, bool isMission
 
 bool IsPlayerDroidLimitReached(int player);
 
+int getStructureDamageBaseExperienceLevel();
+
 bool loadStructureStats(WzConfig &ini);
 /*Load the Structure Strength Modifiers from the file exported from Access*/
 bool loadStructureStrengthModifiers(WzConfig &ini);
@@ -91,7 +95,7 @@ bool structureStatsShutDown();
 int requestOpenGate(STRUCTURE *psStructure);
 int gateCurrentOpenHeight(const STRUCTURE *psStructure, uint32_t time, int minimumStub);  ///< Returns how far open the gate is, or 0 if the structure is not a gate.
 
-int32_t structureDamage(STRUCTURE *psStructure, unsigned damage, WEAPON_CLASS weaponClass, WEAPON_SUBCLASS weaponSubClass, unsigned impactTime, bool isDamagePerSecond, int minDamage);
+int32_t structureDamage(STRUCTURE *psStructure, unsigned damage, WEAPON_CLASS weaponClass, WEAPON_SUBCLASS weaponSubClass, unsigned impactTime, bool isDamagePerSecond, int minDamage, bool empRadiusHit);
 void structureBuild(STRUCTURE *psStructure, DROID *psDroid, int buildPoints, int buildRate = 1);
 void structureDemolish(STRUCTURE *psStructure, DROID *psDroid, int buildPoints);
 void structureRepair(STRUCTURE *psStruct, DROID *psDroid, int buildRate);
@@ -102,9 +106,12 @@ float structureCompletionProgress(const STRUCTURE & structure);
 
 //builds a specified structure at a given location
 STRUCTURE *buildStructure(STRUCTURE_STATS *pStructureType, UDWORD x, UDWORD y, UDWORD player, bool FromSave);
+STRUCTURE *buildStructureDir(STRUCTURE_STATS *pStructureType, UDWORD x, UDWORD y, uint16_t direction, UDWORD player, bool FromSave, uint32_t id);
 STRUCTURE *buildStructureDir(STRUCTURE_STATS *pStructureType, UDWORD x, UDWORD y, uint16_t direction, UDWORD player, bool FromSave);
 /// Create a blueprint structure, with just enough information to render it
-STRUCTURE *buildBlueprint(STRUCTURE_STATS const *psStats, Vector3i xy, uint16_t direction, unsigned moduleIndex, STRUCT_STATES state, uint8_t ownerPlayer);
+/// IMPORTANT: Do not save the reference to this instance anywhere, since it's
+/// not heap-allocated and thus doesn't have a stable address!
+nonstd::optional<STRUCTURE> buildBlueprint(STRUCTURE_STATS const *psStats, Vector3i xy, uint16_t direction, unsigned moduleIndex, STRUCT_STATES state, uint8_t ownerPlayer);
 /* The main update routine for all Structures */
 void structureUpdate(STRUCTURE *psBuilding, bool bMission);
 
@@ -135,8 +142,6 @@ void alignStructure(STRUCTURE *psBuilding);
 void setCurrentStructQuantity(bool displayError);
 /* get a stat inc based on the name */
 int32_t getStructStatFromName(const WzString &name);
-/*check to see if the structure is 'doing' anything  - return true if idle*/
-bool  structureIdle(const STRUCTURE *psBuilding);
 /*sets the point new droids go to - x/y in world coords for a Factory*/
 void setAssemblyPoint(FLAG_POSITION *psAssemblyPoint, UDWORD x, UDWORD y, UDWORD player, bool bCheck);
 
@@ -225,13 +230,9 @@ bool checkSpecificStructExists(UDWORD structInc, UDWORD player);
 int32_t getStructureDamage(const STRUCTURE *psStructure);
 
 unsigned structureBodyBuilt(const STRUCTURE *psStruct);  ///< Returns the maximum body points of a structure with the current number of build points.
-UDWORD structureBody(const STRUCTURE *psStruct);
 UDWORD structureResistance(const STRUCTURE_STATS *psStats, UBYTE player);
 
 void hqReward(UBYTE losingPlayer, UBYTE rewardPlayer);
-
-// Is a structure a factory of somekind?
-bool StructIsFactory(const STRUCTURE *Struct);
 
 // Is a flag a factory delivery point?
 bool FlagIsFactory(const FLAG_POSITION *psCurrFlag);
@@ -310,10 +311,7 @@ bool clearRearmPad(const STRUCTURE *psStruct);
 void ensureRearmPadClear(STRUCTURE *psStruct, DROID *psDroid);
 
 // return whether a rearm pad has a vtol on it
-bool vtolOnRearmPad(STRUCTURE *psStruct, DROID *psDroid);
-
-/* Just returns true if the structure's present body points aren't as high as the original*/
-bool	structIsDamaged(STRUCTURE *psStruct);
+bool vtolOnRearmPad(const STRUCTURE *psStruct, const DROID *psDroid);
 
 // give a structure from one player to another - used in Electronic Warfare
 STRUCTURE *giftSingleStructure(STRUCTURE *psStructure, UBYTE attackPlayer, bool electronic_warfare = true);
@@ -325,7 +323,6 @@ void changeProductionPlayer(UBYTE player);
 bool IsStatExpansionModule(const STRUCTURE_STATS *psStats);
 
 /// is this a blueprint and not a real structure?
-bool structureIsBlueprint(const STRUCTURE *psStructure);
 bool isBlueprint(const BASE_OBJECT *psObject);
 
 /*returns the power cost to build this structure, or to add its next module */
@@ -355,7 +352,7 @@ static inline int structJammerPower(const STRUCTURE *psObj)
 	return objJammerPower((const BASE_OBJECT *)psObj);
 }
 
-static inline Rotation structureGetInterpolatedWeaponRotation(STRUCTURE *psStructure, int weaponSlot, uint32_t time)
+static inline Rotation structureGetInterpolatedWeaponRotation(const STRUCTURE *psStructure, int weaponSlot, uint32_t time)
 {
 	return interpolateRot(psStructure->asWeaps[weaponSlot].prevRot, psStructure->asWeaps[weaponSlot].rot, psStructure->prevTime, psStructure->time, time);
 }
@@ -461,36 +458,36 @@ static inline STRUCTURE const *castStructure(SIMPLE_OBJECT const *psObject)
 	return isStructure(psObject) ? (STRUCTURE const *)psObject : (STRUCTURE const *)nullptr;
 }
 
-static inline int getBuildingResearchPoints(STRUCTURE *psStruct)
+static inline int getBuildingResearchPoints(const STRUCTURE *psStruct)
 {
-	auto &upgrade = psStruct->pStructureType->upgrade[psStruct->player];
+	const auto &upgrade = psStruct->pStructureType->upgrade[psStruct->player];
 	return upgrade.research + upgrade.moduleResearch * psStruct->capacity;
 }
 
-static inline int getBuildingProductionPoints(STRUCTURE *psStruct)
+static inline int getBuildingProductionPoints(const STRUCTURE *psStruct)
 {
-	auto &upgrade = psStruct->pStructureType->upgrade[psStruct->player];
+	const auto &upgrade = psStruct->pStructureType->upgrade[psStruct->player];
 	return upgrade.production + upgrade.moduleProduction * psStruct->capacity;
 }
 
-static inline int getBuildingPowerPoints(STRUCTURE *psStruct)
+static inline int getBuildingPowerPoints(const STRUCTURE *psStruct)
 {
-	auto &upgrade = psStruct->pStructureType->upgrade[psStruct->player];
+	const auto &upgrade = psStruct->pStructureType->upgrade[psStruct->player];
 	return upgrade.power + upgrade.modulePower * psStruct->capacity;
 }
 
-static inline int getBuildingRepairPoints(STRUCTURE *psStruct)
+static inline int getBuildingRepairPoints(const STRUCTURE *psStruct)
 {
 	return psStruct->pStructureType->upgrade[psStruct->player].repair;
 }
 
-static inline int getBuildingRearmPoints(STRUCTURE *psStruct)
+static inline int getBuildingRearmPoints(const STRUCTURE *psStruct)
 {
 	return psStruct->pStructureType->upgrade[psStruct->player].rearm;
 }
 
-WzString getFavoriteStructs();
-void setFavoriteStructs(WzString list);
+bool loadFavoriteStructsFile(const char* path);
+bool writeFavoriteStructsFile(const char* path);
 
 struct LineBuild
 {
@@ -504,5 +501,11 @@ struct LineBuild
 
 LineBuild calcLineBuild(Vector2i size, STRUCTURE_TYPE type, Vector2i pos, Vector2i pos2);
 LineBuild calcLineBuild(STRUCTURE_STATS const *stats, uint16_t direction, Vector2i pos, Vector2i pos2);
+
+// Split the struct storage into pages containing 256 structs, disable slot reuse
+// to guard against memory-related issues when some object pointers won't get
+// updated properly, e.g. when transitioning between the base and offworld missions.
+using StructContainer = PagedEntityContainer<STRUCTURE, 256, false>;
+StructContainer& GlobalStructContainer();
 
 #endif // __INCLUDED_SRC_STRUCTURE_H__

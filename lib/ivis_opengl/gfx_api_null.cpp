@@ -38,18 +38,77 @@ void null_texture::bind()
 	// no-op
 }
 
-void null_texture::upload(const size_t& mip_level, const size_t& offset_x, const size_t& offset_y, const size_t & width, const size_t & height, const gfx_api::pixel_format & buffer_format, const void * data)
+bool null_texture::upload(const size_t& mip_level, const iV_BaseImage& image)
 {
+	ASSERT_OR_RETURN(false, image.data() != nullptr, "Attempt to upload image without data");
+	ASSERT_OR_RETURN(false, image.pixel_format() == internal_format, "Uploading image to texture with different format");
+	size_t width = image.width();
+	size_t height = image.height();
 	ASSERT(width > 0 && height > 0, "Attempt to upload texture with width or height of 0 (width: %zu, height: %zu)", width, height);
 	// no-op
+	return true;
 }
 
-void null_texture::upload_and_generate_mipmaps(const size_t& offset_x, const size_t& offset_y, const size_t& width, const size_t& height, const  gfx_api::pixel_format& buffer_format, const void* data)
+bool null_texture::upload_sub(const size_t& mip_level, const size_t& offset_x, const size_t& offset_y, const iV_Image& image)
 {
+	ASSERT_OR_RETURN(false, image.data() != nullptr, "Attempt to upload image without data");
+	ASSERT_OR_RETURN(false, image.pixel_format() == internal_format, "Uploading image to texture with different format");
+	size_t width = image.width();
+	size_t height = image.height();
+	ASSERT(width > 0 && height > 0, "Attempt to upload texture with width or height of 0 (width: %zu, height: %zu)", width, height);
 	// no-op
+	return true;
 }
 
 unsigned null_texture::id()
+{
+	return 0;
+}
+
+gfx_api::texture2dDimensions null_texture::get_dimensions() const
+{
+	return {tex_width, tex_height};
+}
+
+size_t null_texture::backend_internal_value() const
+{
+	return 0;
+}
+
+// MARK: null_texture_array
+
+null_texture_array::null_texture_array()
+{
+	// no-op
+}
+
+null_texture_array::~null_texture_array()
+{
+	// no-op
+}
+
+void null_texture_array::bind()
+{
+	// no-op
+}
+
+bool null_texture_array::upload_layer(const size_t& layer, const size_t& mip_level, const iV_BaseImage& image)
+{
+	ASSERT_OR_RETURN(false, image.data() != nullptr, "Attempt to upload image without data");
+	ASSERT_OR_RETURN(false, image.pixel_format() == internal_format, "Uploading image to texture with different format");
+	size_t width = image.width();
+	size_t height = image.height();
+	ASSERT(width > 0 && height > 0, "Attempt to upload texture with width or height of 0 (width: %zu, height: %zu)", width, height);
+	// no-op
+	return true;
+}
+
+unsigned null_texture_array::id()
+{
+	return 0;
+}
+
+size_t null_texture_array::backend_internal_value() const
 {
 	return 0;
 }
@@ -104,6 +163,11 @@ void null_buffer::update(const size_t & start, const size_t & size, const void *
 	// no-op
 }
 
+size_t null_buffer::current_buffer_size()
+{
+	return buffer_size;
+}
+
 // MARK: null_pipeline_state_object
 
 null_pipeline_state_object::null_pipeline_state_object(const gfx_api::state_description& _desc, const std::vector<gfx_api::vertex_buffer>& _vertex_buffer_desc)
@@ -122,22 +186,28 @@ null_context::~null_context()
 gfx_api::texture* null_context::create_texture(const size_t& mipmap_count, const size_t & width, const size_t & height, const gfx_api::pixel_format & internal_format, const std::string& filename)
 {
 	auto* new_texture = new null_texture();
+	new_texture->internal_format = internal_format;
+	new_texture->tex_width = width;
+	new_texture->tex_height = height;
 	return new_texture;
 }
 
-gfx_api::buffer * null_context::create_buffer_object(const gfx_api::buffer::usage &usage, const buffer_storage_hint& hint /*= buffer_storage_hint::static_draw*/)
+gfx_api::texture_array* null_context::create_texture_array(const size_t& mipmap_count, const size_t& layer_count, const size_t& width, const size_t& height, const gfx_api::pixel_format& internal_format, const std::string& filename)
+{
+	ASSERT(mipmap_count > 0, "mipmap_count must be > 0");
+	auto* new_texture = new null_texture_array();
+	new_texture->internal_format = internal_format;
+	return new_texture;
+}
+
+gfx_api::buffer * null_context::create_buffer_object(const gfx_api::buffer::usage &usage, const buffer_storage_hint& hint /*= buffer_storage_hint::static_draw*/, const std::string& debugName /*= ""*/)
 {
 	return new null_buffer(usage, hint);
 }
 
-gfx_api::pipeline_state_object * null_context::build_pipeline(const gfx_api::state_description &state_desc,
-															const SHADER_MODE& shader_mode,
-															const gfx_api::primitive_type& primitive,
-															const std::vector<std::type_index>& uniform_blocks,
-															const std::vector<gfx_api::texture_input>& texture_desc,
-															const std::vector<gfx_api::vertex_buffer>& attribute_descriptions)
+gfx_api::pipeline_state_object * null_context::build_pipeline(gfx_api::pipeline_state_object *existing_pso, const gfx_api::pipeline_create_info& createInfo)
 {
-	return new null_pipeline_state_object(state_desc, attribute_descriptions);
+	return new null_pipeline_state_object(createInfo.state_desc, createInfo.attribute_descriptions);
 }
 
 void null_context::bind_pipeline(gfx_api::pipeline_state_object* pso, bool notextures)
@@ -195,7 +265,7 @@ void null_context::unbind_index_buffer(gfx_api::buffer&)
 	// no-op
 }
 
-void null_context::bind_textures(const std::vector<gfx_api::texture_input>& texture_descriptions, const std::vector<gfx_api::texture*>& textures)
+void null_context::bind_textures(const std::vector<gfx_api::texture_input>& texture_descriptions, const std::vector<gfx_api::abstract_texture*>& textures)
 {
 	ASSERT_OR_RETURN(, current_program != nullptr, "current_program == NULL");
 	ASSERT(textures.size() <= texture_descriptions.size(), "Received more textures than expected");
@@ -219,7 +289,17 @@ void null_context::draw(const size_t& offset, const size_t &count, const gfx_api
 	// no-op
 }
 
+void null_context::draw_instanced(const std::size_t& offset, const std::size_t &count, const gfx_api::primitive_type &primitive, std::size_t instance_count)
+{
+	// no-op
+}
+
 void null_context::draw_elements(const size_t& offset, const size_t &count, const gfx_api::primitive_type &primitive, const gfx_api::index_type& index)
+{
+	// no-op
+}
+
+void null_context::draw_elements_instanced(const std::size_t& offset, const std::size_t &count, const gfx_api::primitive_type &primitive, const gfx_api::index_type& index, std::size_t instance_count)
 {
 	// no-op
 }
@@ -247,8 +327,19 @@ int32_t null_context::get_context_value(const context_value property)
 			return 4096;
 		case gfx_api::context::context_value::MAX_SAMPLES:
 			return 0;
+		case gfx_api::context::context_value::MAX_ARRAY_TEXTURE_LAYERS:
+			return 2048;
+		case gfx_api::context::context_value::MAX_VERTEX_ATTRIBS:
+			return 16;
+		case gfx_api::context::context_value::MAX_VERTEX_OUTPUT_COMPONENTS:
+			return 64;
 	}
 	debug(LOG_FATAL, "Unsupported property");
+	return 0;
+}
+
+uint64_t null_context::get_estimated_vram_mb(bool dedicatedOnly)
+{
 	return 0;
 }
 
@@ -302,7 +393,7 @@ uint64_t null_context::debugGetPerfValue(PERF_POINT pp)
 std::map<std::string, std::string> null_context::getBackendGameInfo()
 {
 	std::map<std::string, std::string> backendGameInfo;
-	backendGameInfo["null_gfx_backend"] = true;
+	backendGameInfo["null_gfx_backend"] = "true";
 	return backendGameInfo;
 }
 
@@ -316,7 +407,7 @@ bool null_context::getScreenshot(std::function<void (std::unique_ptr<iV_Image>)>
 	return false;
 }
 
-bool null_context::_initialize(const gfx_api::backend_Impl_Factory& impl, int32_t antialiasing, swap_interval_mode mode)
+bool null_context::_initialize(const gfx_api::backend_Impl_Factory& impl, int32_t antialiasing, swap_interval_mode mode, optional<float> mipLodBias, uint32_t depthMapResolution)
 {
 	// obtain backend_Null_Impl from impl
 	backend_impl = impl.createNullBackendImpl();
@@ -336,7 +427,12 @@ bool null_context::_initialize(const gfx_api::backend_Impl_Factory& impl, int32_
 	return true;
 }
 
-void null_context::flip(int clearMode)
+void null_context::beginRenderPass()
+{
+	// no-op
+}
+
+void null_context::endRenderPass()
 {
 	frameNum = std::max<size_t>(frameNum + 1, 1);
 
@@ -349,6 +445,16 @@ void null_context::flip(int clearMode)
 void null_context::handleWindowSizeChange(unsigned int oldWidth, unsigned int oldHeight, unsigned int newWidth, unsigned int newHeight)
 {
 	// no-op
+}
+
+std::pair<uint32_t, uint32_t> null_context::getDrawableDimensions()
+{
+	return {0,0};
+}
+
+bool null_context::shouldDraw()
+{
+	return false;
 }
 
 void null_context::shutdown()
@@ -371,3 +477,48 @@ gfx_api::context::swap_interval_mode null_context::getSwapInterval() const
 	return backend_impl->getSwapInterval();
 }
 
+bool null_context::textureFormatIsSupported(gfx_api::pixel_format_target target, gfx_api::pixel_format format, gfx_api::pixel_format_usage::flags usage)
+{
+	// no matter what the input is, return true (since this null backend doesn't care and no-ops whatever it gets)
+	return true;
+}
+
+bool null_context::supportsMipLodBias() const
+{
+	return true;
+}
+
+bool null_context::supports2DTextureArrays() const
+{
+	return true;
+}
+
+bool null_context::supportsIntVertexAttributes() const
+{
+	return true;
+}
+
+size_t null_context::maxFramesInFlight() const
+{
+	return 1;
+}
+
+gfx_api::lighting_constants null_context::getShadowConstants()
+{
+	return gfx_api::lighting_constants();
+}
+
+bool null_context::setShadowConstants(gfx_api::lighting_constants newValues)
+{
+	return true;
+}
+
+bool null_context::debugRecompileAllPipelines()
+{
+	return true;
+}
+
+bool null_context::supportsInstancedRendering()
+{
+	return false;
+}

@@ -1,16 +1,24 @@
-
 include("script/campaign/libcampaign.js");
 include("script/campaign/templates.js");
 
-const NEW_PARADIGM_RES = [
+const mis_newParadigmRes = [
 	"R-Wpn-MG1Mk1", "R-Vehicle-Body01", "R-Sys-Spade1Mk1", "R-Vehicle-Prop-Wheels",
 	"R-Sys-Engineering01", "R-Wpn-MG-Damage04", "R-Wpn-MG-ROF02", "R-Wpn-Cannon-Damage03",
 	"R-Wpn-Flamer-Damage03", "R-Wpn-Flamer-Range01", "R-Wpn-Flamer-ROF01",
-	"R-Defense-WallUpgrade03","R-Struc-Materials03", "R-Vehicle-Engine03",
+	"R-Defense-WallUpgrade03", "R-Struc-Materials03", "R-Vehicle-Engine03",
 	"R-Struc-RprFac-Upgrade03", "R-Wpn-Rocket-Damage03", "R-Wpn-Rocket-ROF03",
 	"R-Vehicle-Metals03", "R-Wpn-Mortar-Damage03", "R-Wpn-Rocket-Accuracy02",
 	"R-Wpn-RocketSlow-Damage03", "R-Wpn-Mortar-ROF01", "R-Cyborg-Metals03",
 	"R-Wpn-Mortar-Acc01", "R-Wpn-RocketSlow-Accuracy01", "R-Wpn-Cannon-Accuracy01",
+];
+const mis_newParadigmResClassic = [
+	"R-Defense-WallUpgrade03", "R-Struc-Materials03", "R-Struc-Factory-Upgrade03",
+	"R-Vehicle-Engine03", "R-Vehicle-Metals03", "R-Cyborg-Metals03",
+	"R-Wpn-Cannon-Accuracy01", "R-Wpn-Cannon-Damage03", "R-Wpn-Flamer-Damage03",
+	"R-Wpn-Flamer-ROF01", "R-Wpn-MG-Damage04", "R-Wpn-MG-ROF01",
+	"R-Wpn-Mortar-Acc01", "R-Wpn-Mortar-Damage03", "R-Wpn-Rocket-Accuracy01",
+	"R-Wpn-Rocket-Damage03", "R-Wpn-Rocket-ROF03", "R-Wpn-RocketSlow-Accuracy03",
+	"R-Wpn-RocketSlow-Damage03", "R-Struc-RprFac-Upgrade03"
 ];
 
 camAreaEvent("tankTrapTrig", function(droid)
@@ -60,11 +68,19 @@ function transportBaseSetup()
 
 function getDroidsForNPLZ()
 {
-	const LIM = 8; //Last alpha mission always has 8 transport units
-	var templates = [ cTempl.nphct, cTempl.nphct, cTempl.npmorb, cTempl.npmorb, cTempl.npsbb ];
+	let lim = 8;
+	if (difficulty === HARD)
+	{
+		lim = 9;
+	}
+	else if (difficulty >= INSANE)
+	{
+		lim = 10;
+	}
+	const templates = [ cTempl.nphct, cTempl.nphct, cTempl.npmorb, cTempl.npmorb, cTempl.npsbb ];
 
-	var droids = [];
-	for (var i = 0; i < LIM; ++i)
+	const droids = [];
+	for (let i = 0; i < lim; ++i)
 	{
 		droids.push(templates[camRand(templates.length)]);
 	}
@@ -141,56 +157,61 @@ function setupPatrols()
 
 function eventStartLevel()
 {
-	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, "CAM_1END", {
+	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, cam_levels.alphaEnd, {
 		area: "RTLZ",
 		message: "C1D_LZ",
 		reinforcements: camMinutesToSeconds(2),
 		eliminateBases: true
 	});
 
-	var startpos = getObject("startPosition");
-	var lz = getObject("landingZone"); //player lz
-	var tent = getObject("transporterEntry");
-	var text = getObject("transporterExit");
-	centreView(startpos.x, startpos.y);
+	const startPos = getObject("startPosition");
+	const lz = getObject("landingZone"); //player lz
+	const tEnt = getObject("transporterEntry");
+	const tExt = getObject("transporterExit");
+	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
-	startTransporterEntry(tent.x, tent.y, CAM_HUMAN_PLAYER);
-	setTransporterExit(text.x, text.y, CAM_HUMAN_PLAYER);
+	startTransporterEntry(tEnt.x, tEnt.y, CAM_HUMAN_PLAYER);
+	setTransporterExit(tExt.x, tExt.y, CAM_HUMAN_PLAYER);
 
-	//Get rid of the already existing crate and replace with another
-	camSafeRemoveObject("artifact1", false);
 	camSetArtifacts({
-		"artifactLocation": { tech: "R-Vehicle-Prop-Hover" }, //SE base
+		"artifact1": { tech: "R-Vehicle-Prop-Hover" }, //SE base
 		"NPFactoryW": { tech: "R-Vehicle-Metals03" }, //West factory
 		"NPFactoryNE": { tech: "R-Vehicle-Body12" }, //Main base factory
 	});
 
-	camCompleteRequiredResearch(NEW_PARADIGM_RES, NEW_PARADIGM);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_newParadigmResClassic, CAM_NEW_PARADIGM);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_newParadigmRes, CAM_NEW_PARADIGM);
+	}
 
 	camSetEnemyBases({
 		"NPSouthEastGroup": {
 			cleanup: "NPSouthEast",
 			detectMsg: "C1D_BASE1",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NPMiddleGroup": {
 			cleanup: "NPMiddle",
 			detectMsg: "C1D_BASE2",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NPNorthEastGroup": {
 			cleanup: "NPNorthEast",
 			detectMsg: "C1D_BASE3",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"NPLZGroup": {
 			cleanup: "NPLZ1",
 			detectMsg: "C1D_LZ2",
-			eliminateSnd: "pcv394.ogg",
-			player: NEW_PARADIGM // required for LZ-type bases
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
+			player: CAM_NEW_PARADIGM // required for LZ-type bases
 		},
 	});
 
@@ -205,14 +226,15 @@ function eventStartLevel()
 					camMakePos("hoverDefense5"),
 					camMakePos("hoverDefense6"),
 					camMakePos("hoverDefense7"),
-					camMakePos("hoverDefense8")
+					camMakePos("hoverDefense8"),
+					camMakePos("hoverDefense9")
 				],
 				interval: camSecondsToMilliseconds(45),
 				regroup: false,
 				repair: 66,
 				count: -1,
 			},
-			templates: [ cTempl.nphmgh, cTempl.npltath, cTempl.nphch, cTempl.nphbb ] //Hover factory
+			templates: (!camClassicMode()) ? [ cTempl.nphmgh, cTempl.npltath, cTempl.nphch, cTempl.nphbb ] : [ cTempl.nphmgh, cTempl.npltath, cTempl.nphch ] //Hover factory
 		},
 		"NPFactoryE": {
 			assembly: "NPFactoryEAssembly",

@@ -28,7 +28,7 @@
 #include "lib/framework/vector.h"
 #include <string>
 
-struct WzCheckboxButton : public W_BUTTON
+class WzCheckboxButton : public W_BUTTON
 {
 public:
 	WzCheckboxButton();
@@ -44,7 +44,7 @@ public:
 private:
 	int checkboxSize()
 	{
-		wzText.setText(pText.toUtf8(), FontID);
+		wzText.setText(pText, FontID);
 		return wzText.lineSize() - 2;
 	}
 private:

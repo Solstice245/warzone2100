@@ -24,7 +24,7 @@
 #ifndef __INCLUDED_STATSDEF_H__
 #define __INCLUDED_STATSDEF_H__
 
-struct iIMDShape;
+struct iIMDBaseShape;
 
 #include <vector>
 #include <algorithm>
@@ -285,9 +285,18 @@ struct BASE_STATS
 	size_t index = 0;  ///< Index into containing array
 };
 
-#define getStatsName(_psStats) ((_psStats)->name.isEmpty() ? "" : gettext((_psStats)->name.toUtf8().c_str()))
+#define getStatsName(_psStats) ((_psStats)->name.isEmpty() ? "" : (_psStats)->name.toUtf8().c_str())
+#define getLocalizedStatsName(_psStats) ((_psStats)->name.isEmpty() ? "" : gettext((_psStats)->name.toUtf8().c_str()))
 #define getID(_psStats) (_psStats)->id.toUtf8().c_str()
 #define checkIfZNullStat(_psStats) ((_psStats)->id.toUtf8().find("ZNULL") != std::string::npos)
+
+// Classify some components for more detailed template checking in normal multiplayer
+enum class UsageClass
+{
+	Other,
+	Cyborg,
+	SuperCyborg
+};
 
 /* Stats common to all droid components */
 struct COMPONENT_STATS : public BASE_STATS
@@ -306,13 +315,14 @@ struct COMPONENT_STATS : public BASE_STATS
 	virtual UPGRADE const &getUpgrade(unsigned player) const = 0;
 	UPGRADE &getBase() { return const_cast<UPGRADE &>(const_cast<COMPONENT_STATS const *>(this)->getBase()); }
 
-	iIMDShape *pIMD = nullptr;				/**< The IMD to draw for this component */
+	iIMDBaseShape *pIMD = nullptr;				/**< The IMD to draw for this component */
 	unsigned buildPower = 0;			/**< Power required to build the component */
 	unsigned buildPoints = 0;		/**< Time required to build the component */
 	unsigned weight = 0;				/**< Component's weight */
 	COMPONENT_TYPE compType = COMP_NUMCOMPONENTS;
 	DROID_TYPE droidTypeOverride = DROID_ANY;
 	bool designable = false;		///< Flag to indicate whether this component can be used in the design screen
+	UsageClass usageClass = UsageClass::Other;       ///< Used to check if certain template designs are legit for multiplayer
 };
 
 struct PROPULSION_STATS : public COMPONENT_STATS
@@ -341,7 +351,7 @@ struct SENSOR_STATS : public COMPONENT_STATS
 	UPGRADE const &getBase() const override { return base; }
 	UPGRADE const &getUpgrade(unsigned player) const override { return upgrade[player]; }
 
-	iIMDShape *pMountGraphic = nullptr;     ///< The turret mount to use
+	iIMDBaseShape *pMountGraphic = nullptr;     ///< The turret mount to use
 	unsigned location = 0;                  ///< specifies whether the Sensor is default or for the Turret
 	SENSOR_TYPE type = STANDARD_SENSOR;     ///< used for combat
 
@@ -356,7 +366,7 @@ struct ECM_STATS : public COMPONENT_STATS
 	UPGRADE const &getBase() const override { return base; }
 	UPGRADE const &getUpgrade(unsigned player) const override { return upgrade[player]; }
 
-	iIMDShape *pMountGraphic = nullptr;   ///< The turret mount to use
+	iIMDBaseShape *pMountGraphic = nullptr;   ///< The turret mount to use
 	unsigned location = 0;                ///< Specifies whether the ECM is default or for the Turret
 
 	struct : UPGRADE
@@ -370,7 +380,7 @@ struct REPAIR_STATS : public COMPONENT_STATS
 	UPGRADE const &getBase() const override { return base; }
 	UPGRADE const &getUpgrade(unsigned player) const override { return upgrade[player]; }
 
-	iIMDShape *pMountGraphic = nullptr;	///< The turret mount to use
+	iIMDBaseShape *pMountGraphic = nullptr;	///< The turret mount to use
 	unsigned location = 0;			///< Specifies whether the Repair is default or for the Turret
 	unsigned time = 0;			///< Time delay for repair cycle
 
@@ -396,6 +406,7 @@ struct WEAPON_STATS : public COMPONENT_STATS
 		uint8_t numRounds = 0;               ///< The number of rounds per salvo
 		unsigned reloadTime = 0;             ///< Time to reload the round of ammo
 		unsigned damage = 0;
+		unsigned empRadius = 0;              ///< EMP blast radius -- does no damage
 		unsigned radius = 0;                 ///< Basic blast radius of weapon
 		unsigned radiusDamage = 0;           ///< "Splash damage"
 		unsigned periodicalDamage = 0;       ///< Repeat damage each second after hit
@@ -435,13 +446,13 @@ struct WEAPON_STATS : public COMPONENT_STATS
 	unsigned numExplosions = 0;			///< The number of explosions per shot
 
 	/* Graphics used for the weapon */
-	iIMDShape *pMountGraphic = nullptr;		///< The turret mount to use
-	iIMDShape *pMuzzleGraphic = nullptr;		///< The muzzle flash
-	iIMDShape *pInFlightGraphic = nullptr;		///< The ammo in flight
-	iIMDShape *pTargetHitGraphic = nullptr;		///< The ammo hitting a target
-	iIMDShape *pTargetMissGraphic = nullptr;	///< The ammo missing a target
-	iIMDShape *pWaterHitGraphic = nullptr;		///< The ammo hitting water
-	iIMDShape *pTrailGraphic = nullptr;		///< The trail used for in flight
+	iIMDBaseShape *pMountGraphic = nullptr;		///< The turret mount to use
+	iIMDBaseShape *pMuzzleGraphic = nullptr;		///< The muzzle flash
+	iIMDBaseShape *pInFlightGraphic = nullptr;		///< The ammo in flight
+	iIMDBaseShape *pTargetHitGraphic = nullptr;		///< The ammo hitting a target
+	iIMDBaseShape *pTargetMissGraphic = nullptr;	///< The ammo missing a target
+	iIMDBaseShape *pWaterHitGraphic = nullptr;		///< The ammo hitting water
+	iIMDBaseShape *pTrailGraphic = nullptr;		///< The trail used for in flight
 
 	/* Audio */
 	int iAudioFireID = 0;
@@ -453,7 +464,7 @@ struct CONSTRUCT_STATS : public COMPONENT_STATS
 	UPGRADE const &getBase() const override { return base; }
 	UPGRADE const &getUpgrade(unsigned player) const override { return upgrade[player]; }
 
-	iIMDShape *pMountGraphic = nullptr;      ///< The turret mount to use
+	iIMDBaseShape *pMountGraphic = nullptr;      ///< The turret mount to use
 
 	struct : UPGRADE
 	{
@@ -491,9 +502,9 @@ struct BODY_STATS : public COMPONENT_STATS
 	BODY_SIZE size = SIZE_NUM;      ///< How big the body is - affects how hit
 	unsigned weaponSlots = 0;       ///< The number of weapon slots on the body
 
-	std::vector<iIMDShape *> ppIMDList;	///< list of IMDs to use for propulsion unit - up to numPropulsionStats
-	std::vector<iIMDShape *> ppMoveIMDList;	///< list of IMDs to use when droid is moving - up to numPropulsionStats
-	std::vector<iIMDShape *> ppStillIMDList;///< list of IMDs to use when droid is still - up to numPropulsionStats
+	std::vector<iIMDBaseShape *> ppIMDList;	///< list of IMDs to use for propulsion unit - up to numPropulsionStats
+	std::vector<iIMDBaseShape *> ppMoveIMDList;	///< list of IMDs to use when droid is moving - up to numPropulsionStats
+	std::vector<iIMDBaseShape *> ppStillIMDList;///< list of IMDs to use when droid is still - up to numPropulsionStats
 	WzString         bodyClass;		///< rules hint to script about its classification
 
 	struct UPGRADE : COMPONENT_STATS::UPGRADE

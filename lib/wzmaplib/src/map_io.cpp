@@ -1,7 +1,7 @@
 /*
 	This file is part of Warzone 2100.
 	Copyright (C) 1999-2004  Eidos Interactive
-	Copyright (C) 2005-2021  Warzone 2100 Project
+	Copyright (C) 2005-2022  Warzone 2100 Project
 
 	Warzone 2100 is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -19,7 +19,10 @@
 */
 
 #include "../include/wzmaplib/map_io.h"
+#include "map_internal.h"
 #include <cstdio>
+#include <cstring>
+#include <list>
 
 #if defined(_WIN32)
 # define WIN32_LEAN_AND_MEAN
@@ -29,8 +32,13 @@
 # include <windows.h>
 #endif
 
+#include <sys/types.h>
+#include <sys/stat.h>
 #if !defined(_WIN32)
 # include <fcntl.h>
+# include <dirent.h> // TODO: Also use CMake check for dirent.h
+#else
+# include <direct.h> // For _mkdir / _wmkdir on Windows
 #endif
 
 #include "3rdparty/SDL_endian.h"
@@ -153,6 +161,171 @@ bool BinaryIOStream::writeSLE32(int32_t val)
 	return result.value() == sizeof(val);
 }
 
+bool BinaryIOStream::writeUBE32(uint32_t val)
+{
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+	val = SDL_Swap32(val);
+#endif
+	auto result = writeBytes(&val, sizeof(val));
+	if (!result.has_value()) { return false; }
+	return result.value() == sizeof(val);
+}
+bool BinaryIOStream::writeSBE32(int32_t val)
+{
+#if SDL_BYTEORDER == SDL_LIL_ENDIAN
+	val = SDL_Swap32(val);
+#endif
+	auto result = writeBytes(&val, sizeof(val));
+	if (!result.has_value()) { return false; }
+	return result.value() == sizeof(val);
+}
+
+bool IOProvider::enumerateFiles(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc)
+{
+	// Must implement in subclasses
+	return false;
+}
+
+bool IOProvider::enumerateFolders(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc)
+{
+	// Must implement in subclasses
+	return false;
+}
+
+std::string IOProvider::pathJoin(const std::string& a, const std::string& b)
+{
+	std::string fullPath = a;
+	if (b.empty())
+	{
+		return fullPath;
+	}
+	std::string separator = pathSeparator();
+	if (!fullPath.empty() && !WzMap::strEndsWith(fullPath, separator))
+	{
+		fullPath += separator;
+	}
+	fullPath += b;
+	return fullPath;
+}
+
+std::string IOProvider::pathDirName(const std::string& fullPath)
+{
+	// Split the path at the path separator
+	std::string pathSep = pathSeparator();
+	if (pathSep.empty())
+	{
+		return fullPath;
+	}
+	size_t dirnameLength = fullPath.size();
+	size_t lastPos = dirnameLength;
+	do {
+		lastPos = dirnameLength - pathSep.length();
+		dirnameLength = fullPath.rfind(pathSep, lastPos);
+	} while (dirnameLength != std::string::npos && dirnameLength == lastPos);
+
+	return (dirnameLength != std::string::npos) ? fullPath.substr(0, dirnameLength) : "";
+}
+
+std::string IOProvider::pathBaseName(const std::string& fullPath)
+{
+	// Split the path at the path separator
+	std::string pathSep = pathSeparator();
+	if (pathSep.empty())
+	{
+		return fullPath;
+	}
+	size_t dirnameLength = fullPath.size();
+	size_t lastPos = dirnameLength;
+	do {
+		lastPos = dirnameLength - pathSep.length();
+		dirnameLength = fullPath.rfind(pathSep, lastPos);
+	} while (dirnameLength != std::string::npos && dirnameLength == lastPos);
+
+	return (dirnameLength != std::string::npos) ? fullPath.substr(dirnameLength + 1) : fullPath;
+}
+
+bool IOProvider::enumerateFilesRecursive(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc)
+{
+	// A base implementation of recursive enumeration that utilizes the regular enumerateFiles/Folders functions.
+	// If a particular IOProvider can provide a more optimal implementation, it can override this.
+
+	// Step 1: Enumerate all the files in this folder
+	bool endEnum = false;
+	bool enumSuccess = enumerateFiles(basePath, [&](const char* file) -> bool {
+		if (!enumFunc(file))
+		{
+			endEnum = true;
+			return false;
+		}
+		return true;
+	});
+	if (!enumSuccess) { return false; }
+	if (endEnum) { return true; }
+
+	// Step 2: Enumerate all the folders in this folder, enumerating all the files in each
+	enumSuccess = enumerateFoldersRecursive(basePath, [&](const char* folder) -> bool {
+		bool enumFilesSuccess = enumerateFiles(pathJoin(basePath, folder), [&](const char* file) -> bool {
+			std::string relativePath = pathJoin(folder, file);
+			if (!enumFunc(relativePath.c_str()))
+			{
+				endEnum = true;
+				return false; // stop enumerating files
+			}
+			return true; // continue enumerating files
+		});
+		if (!enumFilesSuccess || endEnum)
+		{
+			return false; // stop enumerating folders
+		}
+		return true; // continue enumerating folders
+	});
+
+	if (!enumSuccess) { return false; }
+	return true;
+}
+
+bool IOProvider::enumerateFoldersRecursive(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc)
+{
+	// A base implementation of recursive enumeration that utilizes the regular enumerateFolders function.
+	// If a particular IOProvider can provide a more optimal implementation, it can override this.
+
+	std::list<std::string> foldersList;
+	foldersList.push_back(""); // "" is used for basePath
+	std::string currentPath;
+	bool endEnum = false;
+	while (!foldersList.empty())
+	{
+		// enumerate the last folder in the foldersList
+		auto it = std::prev(foldersList.end());
+		currentPath = *it;
+		bool enumSuccess = enumerateFolders(pathJoin(basePath, currentPath), [&](const char* subfolder) -> bool {
+			std::string fullRelativePath = currentPath + subfolder;
+			// call enumFunc with the enumerated subfolder
+			if (!enumFunc(fullRelativePath.c_str()))
+			{
+				endEnum = true;
+				return false;
+			}
+
+			// push this subfolder onto the stack
+			foldersList.push_back(fullRelativePath);
+
+			return true; // continue enumerating
+		});
+
+		// remove the item just processed from the stack
+		foldersList.erase(it);
+
+		if (!enumSuccess)
+		{
+			return false;
+		}
+		if (endEnum) { return true; }
+	}
+	return true;
+}
+
+
 class WzMapBinaryStdIOStream : public WzMap::BinaryIOStream
 {
 private:
@@ -212,11 +385,7 @@ public:
 
 	~WzMapBinaryStdIOStream()
 	{
-		if (pFile != nullptr)
-		{
-			fclose(pFile);
-			pFile = nullptr;
-		}
+		close();
 	}
 
 	bool openedFile() const
@@ -247,6 +416,19 @@ public:
 		}
 		return result;
 	};
+
+	virtual bool close() override
+	{
+		if (pFile == nullptr)
+		{
+			return false;
+		}
+
+		fclose(pFile);
+		pFile = nullptr;
+		return true;
+	}
+
 	virtual bool endOfStream() override
 	{
 		bool endOfStream = (feof(pFile) != 0);
@@ -300,7 +482,7 @@ std::unique_ptr<BinaryIOStream> StdIOProvider::openBinaryStream(const std::strin
 	return std::unique_ptr<BinaryIOStream>(pStream);
 }
 
-bool StdIOProvider::loadFullFile(const std::string& filename, std::vector<char>& fileData)
+bool StdIOProvider::loadFullFile(const std::string& filename, std::vector<char>& fileData, bool appendNullCharacter /*= false*/)
 {
 	auto pStream = openBinaryStream(filename, BinaryIOStream::OpenMode::READ);
 	if (!pStream)
@@ -314,13 +496,18 @@ bool StdIOProvider::loadFullFile(const std::string& filename, std::vector<char>&
 	do {
 		data.resize(data.size() + chunkSize);
 		bytesRead = pStream->readBytes(&(data[readPos]), chunkSize);
+		readPos += bytesRead.value_or(0);
 	} while (bytesRead.has_value() && bytesRead.value() == chunkSize);
 	if (!bytesRead.has_value())
 	{
 		// failed reading
 		return false;
 	}
-	data.resize(readPos + bytesRead.value()); // truncate to exact length read
+	data.resize(readPos + ((appendNullCharacter) ? 1 : 0)); // truncate to exact length read (optionally with extra byte for appending null character)
+	if (appendNullCharacter)
+	{
+		data[data.size() - 1] = 0;
+	}
 	fileData = std::move(data);
 	return true;
 }
@@ -344,6 +531,222 @@ bool StdIOProvider::writeFullFile(const std::string& filename, const char *ppFil
 		return false;
 	}
 	return true;
+}
+
+static bool stdIOFolderExistsInternal(const std::string& dirPath)
+{
+#if defined(_WIN32)
+	std::vector<wchar_t> wDirPath;
+	if (!win_utf8ToUtf16(dirPath.c_str(), wDirPath))
+	{
+		return false;
+	}
+	struct _stat buf;
+	int result = _wstat(wDirPath.data(), &buf);
+	if (result != 0)
+	{
+		return false;
+	}
+	return (buf.st_mode & _S_IFDIR) == _S_IFDIR;
+#else
+	struct stat buf;
+	int result = stat(dirPath.c_str(), &buf);
+	if (result != 0)
+	{
+		return false;
+	}
+	return (buf.st_mode & S_IFDIR) == S_IFDIR;
+#endif
+}
+
+bool StdIOProvider::internalMakeDir(const std::string& dirPath)
+{
+#if defined(_WIN32)
+	std::vector<wchar_t> wDirPath;
+	if (!win_utf8ToUtf16(dirPath.c_str(), wDirPath))
+	{
+		return false;
+	}
+	return _wmkdir(wDirPath.data()) == 0;
+#else
+	return mkdir(dirPath.c_str(), 0755) == 0;
+#endif
+}
+
+// Creates a directory (and any required parent directories) and returns true on success (or if the directory already exists)
+bool StdIOProvider::makeDirectory(const std::string& directoryPath)
+{
+	bool result = false;
+	size_t currSeparatorPos = 0;
+	currSeparatorPos = directoryPath.find(pathSeparator(), currSeparatorPos + 1);
+	do
+	{
+		std::string currentSubpath = directoryPath.substr(0, currSeparatorPos);
+		result = stdIOFolderExistsInternal(currentSubpath);
+		if (!result)
+		{
+			result = internalMakeDir(currentSubpath);
+			if (!result)
+			{
+				return false;
+			}
+		}
+		if (currSeparatorPos == std::string::npos)
+		{
+			return result;
+		}
+		currSeparatorPos = directoryPath.find(pathSeparator(), currSeparatorPos + 1);
+	} while (true);
+
+	return result;
+}
+
+const char* StdIOProvider::pathSeparator() const
+{
+#if defined(_WIN32)
+	return "\\";
+#else
+	return "/";
+#endif
+}
+
+enum EnumDirFlags
+{
+	ENUM_RECURSE = 0x01,
+	ENUM_FILES = 0x02,
+	ENUM_FOLDERS = 0x04
+};
+bool enumerateDirInternal(const std::string& rootBasePath, const std::string& basePath, int enumDirFlags, const std::function<bool (const char* file)>& enumFunc)
+{
+#if defined(_WIN32)
+	// List files inside the basePath directory (recursing into subdirectories)
+	std::string findFileStr = rootBasePath;
+	if (!findFileStr.empty() && findFileStr.back() != '\\')
+	{
+		findFileStr += "\\";
+	}
+	if (!basePath.empty())
+	{
+		findFileStr += basePath;
+		if (basePath.back() != '\\')
+		{
+			findFileStr += "\\";
+		}
+	}
+	findFileStr += "*";
+	std::vector<wchar_t> wFindFileStr;
+	if (!win_utf8ToUtf16(findFileStr.c_str(), wFindFileStr))
+	{
+		return false;
+	}
+	WIN32_FIND_DATAW ffd;
+	HANDLE hFind = FindFirstFileW(wFindFileStr.data(), &ffd);
+	if (hFind == INVALID_HANDLE_VALUE)
+	{
+		return false;
+	}
+	std::vector<char> u8_buffer(MAX_PATH, 0);
+	std::string fullFilePath;
+	do {
+		// convert ffd.cFileName to UTF-8
+		if (!win_utf16toUtf8(ffd.cFileName, u8_buffer))
+		{
+			// encoding conversion error...
+			continue;
+		}
+		if (strcmp(u8_buffer.data(), ".") == 0 || strcmp(u8_buffer.data(), "..") == 0)
+		{
+			continue;
+		}
+		fullFilePath = basePath + "\\" + u8_buffer.data();
+		if (!(ffd.dwFileAttributes & FILE_ATTRIBUTE_DIRECTORY))
+		{
+			// found a file
+			if ((enumDirFlags & ENUM_FILES) == ENUM_FILES)
+			{
+				if (!enumFunc(fullFilePath.c_str()))
+				{
+					break;
+				}
+			}
+		}
+		else
+		{
+			if (((enumDirFlags & ENUM_FOLDERS) == ENUM_FOLDERS))
+			{
+				if (!enumFunc(fullFilePath.c_str()))
+				{
+					break;
+				}
+			}
+			if (((enumDirFlags & ENUM_RECURSE) == ENUM_RECURSE))
+			{
+				// recurse into subfolder
+				enumerateDirInternal(rootBasePath, fullFilePath, enumDirFlags, enumFunc);
+			}
+		}
+	} while (FindNextFileW(hFind, &ffd) != 0);
+	FindClose(hFind);
+#else
+	struct dirent *dir = NULL;
+	std::string dirToSearch = rootBasePath;
+	if (!dirToSearch.empty() && dirToSearch.back() != '/')
+	{
+		dirToSearch += "/";
+	}
+	dirToSearch += basePath;
+	DIR *d = opendir(dirToSearch.c_str());
+	if (d == NULL)
+	{
+		return false;
+	}
+	std::string fullFilePath;
+	while ((dir = readdir(d)))
+	{
+		if (strcmp(dir->d_name, "." ) == 0 || strcmp(dir->d_name, "..") == 0)
+		{
+			continue;
+		}
+		fullFilePath = basePath + "/" + dir->d_name;
+		if (dir->d_type == DT_DIR)
+		{
+			// recurse
+			if (((enumDirFlags & ENUM_FOLDERS) == ENUM_FOLDERS))
+			{
+				if (!enumFunc(fullFilePath.c_str()))
+				{
+					break;
+				}
+			}
+			if (((enumDirFlags & ENUM_RECURSE) == ENUM_RECURSE))
+			{
+				enumerateDirInternal(rootBasePath, fullFilePath, enumDirFlags, enumFunc);
+			}
+		}
+		else if ((enumDirFlags & ENUM_FILES) == ENUM_FILES)
+		{
+			// found a file
+			if (!enumFunc(fullFilePath.c_str()))
+			{
+				break;
+			}
+		}
+	}
+	closedir(d);
+#endif
+	return true;
+}
+
+// enumFunc receives each enumerated file, and returns true to continue enumeration, or false to shortcut / stop enumeration
+bool StdIOProvider::enumerateFiles(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc)
+{
+	return enumerateDirInternal(basePath, "", ENUM_FILES, enumFunc);
+}
+
+// enumFunc receives each enumerated subfolder, and returns true to continue enumeration, or false to shortcut / stop enumeration
+bool StdIOProvider::enumerateFolders(const std::string& basePath, const std::function<bool (const char* file)>& enumFunc)
+{
+	return enumerateDirInternal(basePath, "", ENUM_FOLDERS, enumFunc);
 }
 
 } // namespace WzMap

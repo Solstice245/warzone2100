@@ -31,6 +31,7 @@
 
 #include "lib/framework/file.h"
 #include "lib/framework/stdio_ext.h"
+#include "lib/framework/wzapp.h"
 #include "lib/ivis_opengl/piemode.h"
 #include "lib/ivis_opengl/screen.h"
 #include "lib/ivis_opengl/piepalette.h"
@@ -46,6 +47,8 @@
 #include "design.h"
 #include "wrappers.h"
 #include "init.h" // For fileLoadBuffer
+#include "urlrequest.h"
+#include "urlhelpers.h"
 
 /***************************************************************************/
 /*
@@ -105,7 +108,9 @@ static bool bAudioPlaying = false;
 static bool bHoldSeqForAudio = false;
 static bool bSeqSubtitles = true;
 static bool bSeqPlaying = false;
-static WzString aVideoName;
+static WzString currVideoName;
+static WzString currAudioName;
+static std::shared_ptr<VideoProvider> aVideoProvider;
 static SEQLIST aSeqList[MAX_SEQ_LIST];
 static SDWORD currentSeq = -1;
 static SDWORD currentPlaySeq = -1;
@@ -127,11 +132,249 @@ enum VIDEO_RESOLUTION
 
 static bool seq_StartFullScreenVideo(const WzString& videoName, const WzString& audioName, VIDEO_RESOLUTION resolution);
 
+class OnDemandVideoDownloader
+{
+public:
+	// Allows queueing requests for video data
+	// Returns true if the request was queued (either with the current call or previously)
+	// Returns false if an error with a prior request for this video data occurred, or the request cannot be satisfied
+	bool requestVideoData(const WzString& videoName);
+
+	// Obtains a pointer to the video data (if available), queues a download if not (unless an error has occurred previously trying to obtain it - see getVideoDataError)
+	std::shared_ptr<const std::vector<char>> getVideoData(const WzString& videoName);
+
+	uint32_t getVideoDataRequestProgress(const WzString& videoName);
+
+	// Returns whether an error occurred trying to get the video data
+	bool getVideoDataError(const WzString& videoName);
+
+	// Cancel video download
+	bool cancelDownloadRequest(const WzString& videoName);
+
+	// Clear all cached requests
+	void clear();
+
+	// Set base path for requests
+	void setBaseURLPath(const WzString& basePath);
+
+	bool hasBaseURLPath() const { return baseURLPath.has_value(); }
+
+private:
+	class RequestDetails
+	{
+	public:
+		~RequestDetails()
+		{
+			if (status == RequestStatus::Pending && requestHandle)
+			{
+				urlRequestSetCancelFlag(requestHandle);
+			}
+		}
+	public:
+		enum class RequestStatus
+		{
+			Pending,
+			Success,
+			Failure
+		};
+		RequestStatus status = RequestStatus::Pending;
+		std::shared_ptr<std::vector<char>> responseData;
+		uint32_t progressPercentage = 0;
+	private:
+		AsyncURLRequestHandle requestHandle;
+		friend bool OnDemandVideoDownloader::requestVideoData(const WzString& videoName);
+		friend bool OnDemandVideoDownloader::cancelDownloadRequest(const WzString& videoName);
+	};
+	std::unordered_map<WzString, std::shared_ptr<RequestDetails>> priorRequests;
+	optional<WzString> baseURLPath;
+};
+
+static WzString urlEncodeVideoPathComponents(const WzString& partialPath)
+{
+	// Divide up partialPath into path components (by /)
+	auto pathComponents = partialPath.split("/");
+	// Then urlEncode each path component, and recombine
+	WzString result;
+	for (size_t i = 0; i < pathComponents.size(); ++i)
+	{
+		if (i > 0)
+		{
+			result.append("/");
+		}
+		result.append(WzString::fromUtf8(urlEncode(pathComponents[i].toUtf8().c_str())));
+	}
+	return result;
+}
+
+bool OnDemandVideoDownloader::requestVideoData(const WzString& videoName)
+{
+	auto it = priorRequests.find(videoName);
+	if (it != priorRequests.end())
+	{
+		// already requested
+		return it->second->status != RequestDetails::RequestStatus::Failure;
+	}
+
+	// need to request
+
+	auto requestDetails = std::make_shared<RequestDetails>();
+	priorRequests[videoName] = requestDetails;
+
+	if (!baseURLPath.has_value())
+	{
+		requestDetails->status = RequestDetails::RequestStatus::Failure;
+		return false;
+	}
+
+	URLDataRequest urlRequest;
+	urlRequest.url = baseURLPath.value().toUtf8() + urlEncodeVideoPathComponents(videoName).toUtf8();
+	urlRequest.onSuccess = [requestDetails](const std::string& url, const HTTPResponseDetails& responseDetails, const std::shared_ptr<MemoryStruct>& data) {
+		std::string urlCopy = url;
+		long httpStatusCode = responseDetails.httpStatusCode();
+		if (httpStatusCode != 200)
+		{
+			wzAsyncExecOnMainThread([httpStatusCode]{
+				debug(LOG_WARNING, "Query for video returned HTTP status code: %ld", httpStatusCode);
+			});
+		}
+
+		if (!data || data->memory == nullptr || data->size == 0)
+		{
+			// Invalid data response
+			wzAsyncExecOnMainThread([requestDetails, urlCopy]{
+				debug(LOG_INFO, "Failed to load video: %s (no data)", urlCopy.c_str());
+				requestDetails->status = RequestDetails::RequestStatus::Failure;
+			});
+			return;
+		}
+
+		auto memoryBuffer = std::make_shared<std::vector<char>>((char *)data->memory, ((char*)data->memory) + data->size);
+		wzAsyncExecOnMainThread([requestDetails, memoryBuffer, urlCopy]{
+			debug(LOG_INFO, "Loaded video: %s", urlCopy.c_str());
+			requestDetails->status = RequestDetails::RequestStatus::Success;
+			requestDetails->responseData = memoryBuffer;
+		});
+	};
+	urlRequest.onFailure = [requestDetails](const std::string& url, URLRequestFailureType type, std::shared_ptr<HTTPResponseDetails> transferDetails) {
+		std::string urlCopy = url;
+		wzAsyncExecOnMainThread([requestDetails, urlCopy]{
+			debug(LOG_INFO, "Failed to load video: %s", urlCopy.c_str());
+			requestDetails->status = RequestDetails::RequestStatus::Failure;
+		});
+	};
+	urlRequest.progressCallback = [requestDetails](const std::string& url, int64_t dltotal, int64_t dlnow) {
+		std::string urlCopy = url;
+		float progress = static_cast<float>(dlnow) / static_cast<float>(dltotal);
+		wzAsyncExecOnMainThread([requestDetails, urlCopy, progress]{
+			requestDetails->progressPercentage = std::min<uint32_t>(static_cast<uint32_t>(progress * 100.f), 100);
+		});
+	};
+	urlRequest.maxDownloadSizeLimit = 200 * 1024 * 1024; // response should never be > 200 MB
+	auto requestHandle = urlRequestData(urlRequest);
+	if (!requestHandle)
+	{
+		debug(LOG_ERROR, "Failed to request data: %s", urlRequest.url.c_str());
+		requestDetails->status = RequestDetails::RequestStatus::Failure;
+		return false;
+	}
+
+	requestDetails->requestHandle = requestHandle;
+
+	return true;
+}
+
+std::shared_ptr<const std::vector<char>> OnDemandVideoDownloader::getVideoData(const WzString& videoName)
+{
+	auto it = priorRequests.find(videoName);
+	if (it != priorRequests.end())
+	{
+		// already requested
+		if (it->second->status == RequestDetails::RequestStatus::Success)
+		{
+			return it->second->responseData;
+		}
+		else
+		{
+			return nullptr;
+		}
+	}
+
+	requestVideoData(videoName);
+	return nullptr;
+}
+
+uint32_t OnDemandVideoDownloader::getVideoDataRequestProgress(const WzString& videoName)
+{
+	auto it = priorRequests.find(videoName);
+	if (it != priorRequests.end())
+	{
+		// already requested
+		switch (it->second->status)
+		{
+			case RequestDetails::RequestStatus::Pending:
+				return it->second->progressPercentage;
+			case RequestDetails::RequestStatus::Success:
+				return 100;
+			default:
+				return 0;
+		}
+	}
+	return 0;
+}
+
+bool OnDemandVideoDownloader::getVideoDataError(const WzString& videoName)
+{
+	auto it = priorRequests.find(videoName);
+	if (it != priorRequests.end())
+	{
+		return it->second->status == RequestDetails::RequestStatus::Failure;
+	}
+	return false;
+}
+
+// Cancel video download request
+bool OnDemandVideoDownloader::cancelDownloadRequest(const WzString& videoName)
+{
+	auto it = priorRequests.find(videoName);
+	if (it == priorRequests.end())
+	{
+		return false;
+	}
+	if (it->second->requestHandle)
+	{
+		urlRequestSetCancelFlag(it->second->requestHandle);
+	}
+	priorRequests.erase(it);
+	return true;
+}
+
+void OnDemandVideoDownloader::clear()
+{
+	priorRequests.clear();
+}
+
+void OnDemandVideoDownloader::setBaseURLPath(const WzString& basePath)
+{
+	baseURLPath = basePath;
+}
+
+static OnDemandVideoDownloader onDemandVideoProvider;
+
 /***************************************************************************/
 /*
  *	Source
  */
 /***************************************************************************/
+
+bool seq_hasVideos()
+{
+	return PHYSFS_exists("sequences/devastation.ogg") || onDemandVideoProvider.hasBaseURLPath();
+}
+
+void seq_setOnDemandVideoURL(const WzString& videoBaseURL)
+{
+	onDemandVideoProvider.setBaseURLPath(videoBaseURL);
+}
 
 /* Renders a video sequence specified by filename to a buffer*/
 bool seq_RenderVideoToBuffer(const WzString &sequenceName, int seqCommand)
@@ -191,43 +434,135 @@ bool seq_RenderVideoToBuffer(const WzString &sequenceName, int seqCommand)
 
 static void seq_SetUserResolution()
 {
+	glm::uvec2 video_size;
+
 	switch (war_GetFMVmode())
 	{
 	case FMV_1X:
-		{
-			// Native (1x)
-			const int x = (screenWidth - 320) / 2;
-			const int y = (screenHeight - 240) / 2;
-			seq_SetDisplaySize(320, 240, x, y);
-			break;
-		}
-	case FMV_2X:
-		{
-			// Double (2x)
-			const int x = (screenWidth - 640) / 2;
-			const int y = (screenHeight - 480) / 2;
-			seq_SetDisplaySize(640, 480, x, y);
-			break;
-		}
-	case FMV_FULLSCREEN:
-		seq_SetDisplaySize(screenWidth, screenHeight, 0, 0);
+		// Native (1x)
+		video_size = {320, 240};
 		break;
+
+	case FMV_2X:
+		// Double (2x)
+		video_size = {640, 480};
+		break;
+
+	case FMV_FULLSCREEN:
+	{
+		const auto scaled_width = std::min(screenWidth / 4.0f, screenHeight / 3.0f) * 4.0f;
+		video_size = {static_cast<int>(scaled_width), static_cast<int>(scaled_width * 3 / 4.0f)};
+		break;
+	}
 
 	default:
 		ASSERT(!"invalid FMV mode", "Invalid FMV mode: %u", (unsigned int)war_GetFMVmode());
-		break;
+		return;
 	}
+
+	const int x = (screenWidth - video_size.x) / 2;
+	const int y = (screenHeight - video_size.y) / 2;
+	seq_SetDisplaySize(video_size.x, video_size.y, x, y);
+}
+
+static bool seqPlayOrQueueFetch(const WzString& videoName, const WzString& audioName)
+{
+	aVideoProvider.reset();
+	currVideoName = videoName;
+	currAudioName = audioName;
+
+	// Try to find local sequences
+	WzString aVideoName = WzString("sequences/" + videoName);
+	PHYSFS_file *fpInfile = PHYSFS_openRead(aVideoName.toUtf8().c_str());
+
+	if (fpInfile != nullptr)
+	{
+		aVideoProvider = makeVideoProvider(fpInfile, videoName);
+	}
+	else
+	{
+		bool isNoVideo = videoName.startsWith("novideo");
+
+		if (!onDemandVideoProvider.hasBaseURLPath() || isNoVideo)
+		{
+			// no on-demand fallback available - log the failure to open local file
+			code_part log_part = LOG_INFO;
+			if (isNoVideo)
+			{
+				// in these special cases, don't clutter the logs with LOG_INFO level events
+				log_part = LOG_VIDEO;
+			}
+			debug(log_part, "unable to open '%s' for playback", aVideoName.toUtf8().c_str());
+
+			seq_Shutdown();
+			return false;
+		}
+
+		// Try to download video from on-demand provider
+		auto videoData = onDemandVideoProvider.getVideoData(videoName);
+		if (!videoData)
+		{
+			if (onDemandVideoProvider.getVideoDataError(videoName))
+			{
+				seq_Shutdown();
+				return false;
+			}
+			// Otherwise, request is queued
+			// Return true and handle waiting inside seq_UpdateFullScreenVideo
+			// (Each later call to seq_UpdateFullScreenVideo will check if still waiting, and then dispkay the download progress before itself kicking off seq_Play once the buffer is ready)
+			return true;
+		}
+
+		aVideoProvider = makeVideoProvider(videoData, videoName);
+	}
+
+	if (!seq_Play(aVideoProvider))
+	{
+		seq_Shutdown();
+		return false;
+	}
+
+	if (audioName.isEmpty())
+	{
+		bAudioPlaying = false;
+	}
+	else
+	{
+		ASSERT(audioName.isEmpty(), "Unexpected audio stream specified: %s (for video: %s)", audioName.toUtf8().c_str(), videoName.toUtf8().c_str());
+
+		// NOT controlled by sliders for now?
+		static const float maxVolume = 1.f;
+
+		WzString aAudioName("sequenceaudio/" + audioName);
+		bAudioPlaying = audio_PlayStream(aAudioName.toUtf8().c_str(), maxVolume, nullptr, nullptr) ? true : false;
+		ASSERT(bAudioPlaying == true, "unable to initialise sound %s", aAudioName.toUtf8().c_str());
+	}
+
+	return true;
+}
+
+static bool seqPlayOrQueueFetch_Retry()
+{
+	return seqPlayOrQueueFetch(currVideoName, currAudioName);
 }
 
 //full screenvideo functions
+// "audioName" doesn't appear to be used? (seems to always be set to empty string?) // past-due (2022)
 static bool seq_StartFullScreenVideo(const WzString& videoName, const WzString& audioName, VIDEO_RESOLUTION resolution)
 {
-	WzString aAudioName("sequenceaudio/" + audioName);
-
 	bHoldSeqForAudio = false;
-	aVideoName = WzString("sequences/" + videoName);
-
 	iV_SetTextColour(WZCOL_TEXT_BRIGHT);
+
+	if (resolution == VIDEO_USER_CHOSEN_RESOLUTION)
+	{
+		// set the dimensions to show full screen or native or ...
+		seq_SetUserResolution();
+	}
+
+	if (!seqPlayOrQueueFetch(videoName, audioName))
+	{
+		return false;
+	}
 
 	/* We do not want to enter loop_SetVideoPlaybackMode() when we are
 	 * doing intelligence videos.
@@ -242,35 +577,50 @@ static bool seq_StartFullScreenVideo(const WzString& videoName, const WzString& 
 			loop_SetVideoPlaybackMode();
 			iV_SetTextColour(WZCOL_TEXT_BRIGHT);
 		}
-
-		// set the dimensions to show full screen or native or ...
-		seq_SetUserResolution();
-	}
-
-	if (!seq_Play(aVideoName.toUtf8().c_str()))
-	{
-		seq_Shutdown();
-		return false;
-	}
-
-	if (audioName.isEmpty())
-	{
-		bAudioPlaying = false;
-	}
-	else
-	{
-		// NOT controlled by sliders for now?
-		static const float maxVolume = 1.f;
-
-		bAudioPlaying = audio_PlayStream(aAudioName.toUtf8().c_str(), maxVolume, nullptr, nullptr) ? true : false;
-		ASSERT(bAudioPlaying == true, "unable to initialise sound %s", aAudioName.toUtf8().c_str());
 	}
 
 	return true;
 }
 
-bool seq_UpdateFullScreenVideo(int *pbClear)
+void update_user_resolution()
 {
+	static glm::uvec2 previousScreenResolution = {0, 0};
+	if (previousScreenResolution.x != screenWidth || previousScreenResolution.y != screenHeight)
+	{
+		seq_SetUserResolution();
+		previousScreenResolution = {screenWidth, screenHeight};
+	}
+}
+
+bool seq_UpdateFullScreenVideo()
+{
+	update_user_resolution();
+
+	if (!aVideoProvider)
+	{
+		// request has been queued
+		// try again and see if it's available
+		if (!seqPlayOrQueueFetch_Retry())
+		{
+			return false;
+		}
+
+		if (!aVideoProvider)
+		{
+			// still don't have the video data yet, but it's being fetched
+			// display loading message
+			if (wzCachedSeqText.size() < 2)
+			{
+				wzCachedSeqText.resize(2);
+			}
+			wzCachedSeqText[0].setText(WzString::fromUtf8(astringf("%s (%" PRIu32 "%%)...", _("Loading video"), onDemandVideoProvider.getVideoDataRequestProgress(currVideoName))), font_scaled);
+			wzCachedSeqText[0].render((pie_GetVideoBufferWidth() - wzCachedSeqText[0].width()) / 2, (pie_GetVideoBufferHeight() - wzCachedSeqText[0].height()) / 2, WZCOL_WHITE);
+			return true;
+		}
+
+		// otherwise, we have the data - continue
+	}
+
 	int i;
 	bool bMoreThanOneSequenceLine = false;
 	bool stillPlaying;
@@ -303,10 +653,10 @@ bool seq_UpdateFullScreenVideo(int *pbClear)
 
 			if (frameTime >= seqtext.endTime && frameTime < seqtext.endTime)
 			{
-				if (pbClear != nullptr)
-				{
-					*pbClear = CLEAR_BLACK;
-				}
+//				if (pbClear != nullptr)
+//				{
+//					*pbClear = CLEAR_BLACK;
+//				}
 			}
 		}
 	}
@@ -366,7 +716,7 @@ bool seq_UpdateFullScreenVideo(int *pbClear)
 			{
 				seq_Shutdown();
 
-				if (!seq_Play(aVideoName.toUtf8().c_str()))
+				if (!seq_Play(aVideoProvider))
 				{
 					bHoldSeqForAudio = true;
 				}
@@ -389,6 +739,7 @@ bool seq_UpdateFullScreenVideo(int *pbClear)
 void seqReleaseAll()
 {
 	seq_Shutdown();
+	aVideoProvider.reset();
 	wzCachedSeqText.clear();
 }
 
@@ -399,8 +750,11 @@ bool seq_StopFullScreenVideo()
 		loop_ClearVideoPlaybackMode();
 	}
 
+	onDemandVideoProvider.cancelDownloadRequest(currVideoName);
+
 	seq_Shutdown();
 
+	aVideoProvider.reset();
 	wzCachedSeqText.clear();
 
 	return true;
@@ -430,7 +784,6 @@ bool seq_AddTextForVideo(const char *pText, SDWORD xOffset, SDWORD yOffset, doub
 		{
 			currentLength--;
 		}
-		currentLength--;
 	}
 
 	memcpy(currentText, pText, currentLength);
@@ -438,7 +791,7 @@ bool seq_AddTextForVideo(const char *pText, SDWORD xOffset, SDWORD yOffset, doub
 
 	//check the string is shortenough to print
 	//if not take a word of the end and try again
-	while (iV_GetTextWidth(currentText, font_scaled) > buffer_width)
+	while ((currentLength > 0) && iV_GetTextWidth(currentText, font_scaled) > buffer_width)
 	{
 		currentLength--;
 		while ((pText[currentLength] != ' ') && (currentLength > 0))
@@ -560,6 +913,7 @@ void seq_ClearSeqList()
 	{
 		aSeqList[i].reset();
 	}
+	onDemandVideoProvider.clear();
 }
 
 //add a sequence to the list to be played
@@ -568,6 +922,11 @@ void seq_AddSeqToList(const WzString &pSeqName, const WzString &audioName, const
 	currentSeq++;
 
 	ASSERT_OR_RETURN(, currentSeq < MAX_SEQ_LIST, "too many sequences");
+
+	if (onDemandVideoProvider.hasBaseURLPath())
+	{
+		onDemandVideoProvider.requestVideoData(pSeqName);
+	}
 
 	//OK so add it to the list
 	aSeqList[currentSeq].pSeq = pSeqName;
@@ -610,7 +969,7 @@ bool seq_AnySeqLeft()
 	return !aSeqList[nextSeq].pSeq.isEmpty();
 }
 
-void seq_StartNextFullScreenVideo()
+bool seq_StartNextFullScreenVideo()
 {
 	bool	bPlayedOK;
 
@@ -632,6 +991,8 @@ void seq_StartNextFullScreenVideo()
 			displayGameOver(getScriptWinLoseVideo() == PLAY_WIN, false);
 		}
 	}
+
+	return bPlayedOK;
 }
 
 

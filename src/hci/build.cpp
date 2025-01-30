@@ -1,3 +1,22 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 2021-2023  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+
 #include "lib/framework/frame.h"
 #include "lib/framework/input.h"
 #include "lib/widget/button.h"
@@ -26,9 +45,9 @@ void BuildController::updateBuildersList()
 
 	ASSERT_OR_RETURN(, selectedPlayer < MAX_PLAYERS, "selectedPlayer = %" PRIu32 "", selectedPlayer);
 
-	for (DROID *droid = apsDroidLists[selectedPlayer]; droid; droid = droid->psNext)
+	for (DROID *droid : apsDroidLists[selectedPlayer])
 	{
-		if (isConstructionDroid(droid) && droid->died == 0)
+		if (droid->isConstructionDroid() && droid->died == 0)
 		{
 			builders.push_back(droid);
 		}
@@ -63,17 +82,10 @@ STRUCTURE_STATS *BuildController::getObjectStatsAt(size_t objectIndex) const
 		return builderStats;
 	}
 
-	if (builder->order.type == DORDER_BUILD && orderStateObj(builder, DORDER_BUILD)) // Is building
+	auto structure = DroidGetBuildStructure(builder);
+	if (structure != nullptr) // Is building
 	{
-		return builder->order.psStats;
-	}
-
-	if (builder->order.type == DORDER_HELPBUILD || builder->order.type == DORDER_LINEBUILD) // Is helping
-	{
-		if (auto structure = orderStateObj(builder, DORDER_HELPBUILD))
-		{
-			return ((STRUCTURE *)structure)->pStructureType;
-		}
+		return structure->pStructureType;
 	}
 
 	if (orderState(builder, DORDER_DEMOLISH))
@@ -108,7 +120,15 @@ void BuildController::startBuildPosition(STRUCTURE_STATS *buildOption)
 
 void BuildController::toggleFavorites(STRUCTURE_STATS *buildOption)
 {
-	asStructureStats[buildOption->index].isFavorite = !shouldShowFavorites();
+	bool &isFavorite = asStructureStats[buildOption->index].isFavorite;
+	if (shouldShowFavorites())
+	{
+		isFavorite = false;
+	}
+	else
+	{
+		isFavorite = !isFavorite;
+	}
 	updateBuildOptionsList();
 }
 
@@ -125,7 +145,7 @@ void BuildController::refresh()
 void BuildController::clearData()
 {
 	builders.clear();
-	setHighlightedObject(nullptr);
+	setHighlightedObject(nullptr, false);
 	stats.clear();
 }
 
@@ -141,12 +161,12 @@ void BuildController::toggleBuilderSelection(DROID *droid)
 		{
 			highlightedObject->selected = true;
 		}
-		selectObject(droid);
+		selectObject(droid, false);
 	}
 	triggerEventSelected();
 }
 
-void BuildController::setHighlightedObject(BASE_OBJECT *object)
+void BuildController::setHighlightedObject(BASE_OBJECT *object, bool jumpToHighlightedStatsObject)
 {
 	if (object == nullptr)
 	{
@@ -156,7 +176,8 @@ void BuildController::setHighlightedObject(BASE_OBJECT *object)
 
 	auto builder = castDroid(object);
 	ASSERT_NOT_NULLPTR_OR_RETURN(, builder);
-	ASSERT_OR_RETURN(, isConstructionDroid(builder), "Droid is not a construction droid");
+	ASSERT_OR_RETURN(, builder->isConstructionDroid(), "Droid is not a construction droid");
+	queuedJumpToHighlightedStatsObject = queuedJumpToHighlightedStatsObject || jumpToHighlightedStatsObject;
 	highlightedBuilder = builder;
 }
 
@@ -184,7 +205,7 @@ public:
 		}
 
 		controller->clearSelection();
-		controller->selectObject(controller->getObjectAt(objectIndex));
+		controller->selectObject(controller->getObjectAt(objectIndex), false);
 		jump();
 
 		BaseStatsController::scheduleDisplayStatsForm(controller);
@@ -203,7 +224,7 @@ protected:
 			intRefreshScreen();
 			return;
 		}
-		displayIMD(Image(), ImdObject::Droid(droid), xOffset, yOffset);
+		displayIMD(AtlasImage(), ImdObject::Droid(droid), xOffset, yOffset);
 		displayIfHighlight(xOffset, yOffset);
 	}
 
@@ -247,7 +268,7 @@ protected:
 	{
 		updateLayout();
 		auto stat = getStats();
-		displayIMD(Image(), stat ? ImdObject::StructureStat(stat): ImdObject::Component(nullptr), xOffset, yOffset);
+		displayIMD(AtlasImage(), stat ? ImdObject::StructureStat(stat): ImdObject::Component(nullptr), xOffset, yOffset);
 		displayIfHighlight(xOffset, yOffset);
 	}
 
@@ -290,11 +311,6 @@ private:
 		progressBar->hide();
 
 		ASSERT_NOT_NULLPTR_OR_RETURN(, droid);
-		if (!DroidIsBuilding(droid))
-		{
-			return;
-		}
-
 		ASSERT(droid->asBits[COMP_CONSTRUCT], "Invalid droid type");
 
 		if (auto structure = DroidGetBuildStructure(droid))
@@ -390,13 +406,13 @@ private:
 		else
 		{
 			controller->clearSelection();
-			controller->selectObject(droid);
+			controller->selectObject(droid, true);
 		}
 
 		BaseStatsController::scheduleDisplayStatsForm(controller);
 	}
 
-	void clickSecondary() override
+	void clickSecondary(bool synthesizedFromHold) override
 	{
 		auto droid = controller->getObjectAt(objectIndex);
 		ASSERT_NOT_NULLPTR_OR_RETURN(, droid);
@@ -405,7 +421,7 @@ private:
 		// prevent highlighting a builder when another builder is already selected
 		if (droid == highlighted || !highlighted->selected)
 		{
-			controller->setHighlightedObject(droid);
+			controller->setHighlightedObject(droid, true);
 			BaseStatsController::scheduleDisplayStatsForm(controller);
 		}
 	}
@@ -439,8 +455,12 @@ protected:
 		auto stat = getStats();
 		ASSERT_NOT_NULLPTR_OR_RETURN(, stat);
 
-		displayIMD(Image(), ImdObject::StructureStat(stat), xOffset, yOffset);
+		displayIMD(AtlasImage(), ImdObject::StructureStat(stat), xOffset, yOffset);
 		displayIfHighlight(xOffset, yOffset);
+		if (asStructureStats[stat->index].isFavorite && !controller->shouldShowFavorites())
+		{
+			iV_DrawImage(IntImages, IMAGE_ALLY_RESEARCH_TC, xOffset + x() + 44, yOffset + y() + 3);
+		}
 	}
 
 private:
@@ -488,7 +508,7 @@ private:
 		});
 	}
 
-	void clickSecondary() override
+	void clickSecondary(bool synthesizedFromHold) override
 	{
 		auto clickedStats = controller->getStatsAt(buildOptionIndex);
 		ASSERT_NOT_NULLPTR_OR_RETURN(, clickedStats);
@@ -579,11 +599,11 @@ private:
 		attach(obsoleteButton = std::make_shared<MultipleChoiceButton>());
 		obsoleteButton->style |= WBUT_SECONDARY;
 		obsoleteButton->setChoice(controller->shouldShowRedundantDesign());
-		obsoleteButton->setImages(false, MultipleChoiceButton::Images(Image(IntImages, IMAGE_OBSOLETE_HIDE_UP), Image(IntImages, IMAGE_OBSOLETE_HIDE_UP), Image(IntImages, IMAGE_OBSOLETE_HIDE_HI)));
+		obsoleteButton->setImages(false, MultipleChoiceButton::Images(AtlasImage(IntImages, IMAGE_OBSOLETE_HIDE_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_HIDE_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_HIDE_HI)));
 		obsoleteButton->setTip(false, _("Hiding Obsolete Tech"));
-		obsoleteButton->setImages(true,  MultipleChoiceButton::Images(Image(IntImages, IMAGE_OBSOLETE_SHOW_UP), Image(IntImages, IMAGE_OBSOLETE_SHOW_UP), Image(IntImages, IMAGE_OBSOLETE_SHOW_HI)));
+		obsoleteButton->setImages(true,  MultipleChoiceButton::Images(AtlasImage(IntImages, IMAGE_OBSOLETE_SHOW_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_SHOW_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_SHOW_HI)));
 		obsoleteButton->setTip(true, _("Showing Obsolete Tech"));
-		obsoleteButton->move(4 + Image(IntImages, IMAGE_FDP_UP).width() + 4, STAT_SLDY);
+		obsoleteButton->move(4 + AtlasImage(IntImages, IMAGE_FDP_UP).width() + 4, STAT_SLDY);
 
 		auto weakController = std::weak_ptr<BuildController>(controller);
 		obsoleteButton->addOnClickHandler([weakController](W_BUTTON &button) {
@@ -602,11 +622,11 @@ private:
 		attach(favoriteButton = std::make_shared<MultipleChoiceButton>());
 		favoriteButton->style |= WBUT_SECONDARY;
 		favoriteButton->setChoice(controller->shouldShowFavorites());
-		favoriteButton->setImages(false, MultipleChoiceButton::Images(Image(IntImages, IMAGE_ALLY_RESEARCH), Image(IntImages, IMAGE_ALLY_RESEARCH), Image(IntImages, IMAGE_ALLY_RESEARCH)));
+		favoriteButton->setImages(false, MultipleChoiceButton::Images(AtlasImage(IntImages, IMAGE_ALLY_RESEARCH), AtlasImage(IntImages, IMAGE_ALLY_RESEARCH), AtlasImage(IntImages, IMAGE_ALLY_RESEARCH)));
 		favoriteButton->setTip(false, _("Showing All Tech\nRight-click to add to Favorites"));
-		favoriteButton->setImages(true,  MultipleChoiceButton::Images(Image(IntImages, IMAGE_ALLY_RESEARCH_TC), Image(IntImages, IMAGE_ALLY_RESEARCH_TC), Image(IntImages, IMAGE_ALLY_RESEARCH_TC)));
+		favoriteButton->setImages(true,  MultipleChoiceButton::Images(AtlasImage(IntImages, IMAGE_ALLY_RESEARCH_TC), AtlasImage(IntImages, IMAGE_ALLY_RESEARCH_TC), AtlasImage(IntImages, IMAGE_ALLY_RESEARCH_TC)));
 		favoriteButton->setTip(true, _("Showing Only Favorite Tech\nRight-click to remove from Favorites"));
-		favoriteButton->move(4 * 2 + Image(IntImages, IMAGE_FDP_UP).width() * 2 + 4 * 2, STAT_SLDY);
+		favoriteButton->move(4 * 2 + AtlasImage(IntImages, IMAGE_FDP_UP).width() * 2 + 4 * 2, STAT_SLDY);
 
 		auto weakController = std::weak_ptr<BuildController>(controller);
 		favoriteButton->addOnClickHandler([weakController](W_BUTTON &button) {

@@ -38,10 +38,11 @@
 #include "multistat.h"
 #include "multirecv.h"
 #include "stdinreader.h"
+#include "multilobbycommands.h"
 
 #include <array>
 
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -66,6 +67,11 @@ static std::array<optional<PingChallengeBytes>, MAX_CONNECTED_PLAYERS> pingChall
 // We use setMultiStats() to broadcast the score when needed.
 bool sendScoreCheck()
 {
+	if (game.blindMode != BLIND_MODE::NONE)
+	{
+		// no-op in blind mode
+		return false;
+	}
 	// Broadcast any changes in other players, but not in FRONTEND!!!
 	// Detection for this no longer uses title mode, but instead game mode, because that makes more sense
 	if (GetGameMode() == GS_NORMAL)
@@ -78,7 +84,7 @@ bool sendScoreCheck()
 			if (myResponsibility(i))
 			{
 				// Send score to everyone else
-				setMultiStats(i, getMultiStats(i), false);
+				sendMultiStatsScoreUpdates(i);
 			}
 		}
 	}
@@ -288,7 +294,7 @@ bool recvPing(NETQUEUE queue)
 	// If this is a new ping, respond to it
 	if (isNew)
 	{
-		challengeResponse = getMultiStats(us).identity.sign(&challenge, PING_CHALLENGE_BYTES);
+		challengeResponse = getLocalSharedIdentity().sign(&challenge, PING_CHALLENGE_BYTES);
 
 		NETbeginEncode(NETnetQueue(sender), NET_PING);
 		// We are responding to a new ping
@@ -313,7 +319,7 @@ bool recvPing(NETQUEUE queue)
 		const auto& senderIdentity = getMultiStats(sender).identity;
 		if (!senderIdentity.empty())
 		{
-			verifiedResponse = getMultiStats(sender).identity.verify(challengeResponse, expectedPingChallenge.value().data(), PING_CHALLENGE_BYTES);
+			verifiedResponse = senderIdentity.verify(challengeResponse, expectedPingChallenge.value().data(), PING_CHALLENGE_BYTES);
 		}
 		if (!verifiedResponse)
 		{
@@ -330,10 +336,22 @@ bool recvPing(NETQUEUE queue)
 			// Record that they've verified the identity
 			ingame.VerifiedIdentity[sender] = true;
 
+			if (NetPlay.isHost && game.blindMode != BLIND_MODE::NONE)
+			{
+				// check if verified identity is an admin, and handle changes to admin status
+				bool oldIsAdminStatus = NetPlay.players[sender].isAdmin;
+				NetPlay.players[sender].isAdmin = identityMatchesAdmin(senderIdentity);
+				if (oldIsAdminStatus != NetPlay.players[sender].isAdmin)
+				{
+					// then send info about admin status changes to all players
+					NETBroadcastPlayerInfo(sender);
+				}
+			}
+
 			// Output to stdinterface, if enabled
 			std::string senderPublicKeyB64 = base64Encode(senderIdentity.toBytes(EcKey::Public));
 			std::string senderIdentityHash = senderIdentity.publicHashString();
-			wz_command_interface_output("WZEVENT: player identity VERIFIED: %" PRIu32 " %s %s\n", sender, senderPublicKeyB64.c_str(), senderIdentityHash.c_str());
+			wz_command_interface_output("WZEVENT: player identity VERIFIED: %" PRIu32 " %s %s %s\n", sender, senderPublicKeyB64.c_str(), senderIdentityHash.c_str(), NetPlay.players[sender].IPtextAddress);
 		}
 
 		// Note that we have received it

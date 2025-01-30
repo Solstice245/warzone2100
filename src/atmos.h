@@ -31,7 +31,7 @@ struct ATPART
 	UDWORD		size;
 	Vector3f	position;
 	Vector3f	velocity;
-	iIMDShape	*imd;
+	iIMDBaseShape	*imd;
 };
 
 enum WT_CLASS
@@ -43,8 +43,8 @@ enum WT_CLASS
 
 void atmosInitSystem();
 void atmosUpdateSystem();
-void renderParticle(ATPART *psPart, const glm::mat4 &viewMatrix);
-void atmosDrawParticles(const glm::mat4 &viewMatrix);
+void renderParticle(ATPART *psPart, const glm::mat4 &perspectiveViewMatrix);
+void atmosDrawParticles(const glm::mat4 &viewMatrix, const glm::mat4 &perspectiveViewMatrix);
 void atmosSetWeatherType(WT_CLASS type);
 WT_CLASS atmosGetWeatherType();
 

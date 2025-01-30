@@ -28,6 +28,7 @@
 
 #include "netlog.h"
 #include "netplay.h"
+#include "netpermissions.h"
 
 // ////////////////////////////////////////////////////////////////////////
 // Logging for debug only
@@ -111,16 +112,20 @@ bool NETstopLogging(void)
 	WZ_PHYSFS_writeBytes(pFileHandle, buf, static_cast<PHYSFS_uint32>(strlen(buf)));
 	snprintf(buf, sizeof(buf), "banned: %u, cantjoin: %u, rejected: %u\n", sync_counter.banned, sync_counter.cantjoin, sync_counter.rejected);
 	WZ_PHYSFS_writeBytes(pFileHandle, buf, static_cast<PHYSFS_uint32>(strlen(buf)));
-	if (sync_counter.banned && IPlist)
+	if (sync_counter.banned)
 	{
-		snprintf(buf, sizeof(buf), "Banned list:\n");
-		WZ_PHYSFS_writeBytes(pFileHandle, buf, static_cast<PHYSFS_uint32>(strlen(buf)));
-		for (i = 0; i < MAX_BANS; i++)
+		auto banList = NETgetIPBanList();
+		if (!banList.empty())
 		{
-			if (IPlist[i].IPAddress[0] != '\0')
+			snprintf(buf, sizeof(buf), "Banned list:\n");
+			WZ_PHYSFS_writeBytes(pFileHandle, buf, static_cast<PHYSFS_uint32>(strlen(buf)));
+			for (const auto& banDetails : banList)
 			{
-				snprintf(buf, sizeof(buf), "player %s, IP: %s\n", IPlist[i].pname, IPlist[i].IPAddress);
-				WZ_PHYSFS_writeBytes(pFileHandle, buf, static_cast<PHYSFS_uint32>(strlen(buf)));
+				if (banDetails.IPAddress[0] != '\0')
+				{
+					snprintf(buf, sizeof(buf), "player %s, IP: %s\n", banDetails.pname, banDetails.IPAddress);
+					WZ_PHYSFS_writeBytes(pFileHandle, buf, static_cast<PHYSFS_uint32>(strlen(buf)));
+				}
 			}
 		}
 
@@ -186,15 +191,15 @@ bool NETlogEntry(const char *str, UDWORD a, UDWORD b)
 	if (a < NUM_GAME_PACKETS)
 		// replace common msgs with txt descriptions
 	{
-		snprintf(buf, sizeof(buf), "%s \t: %s \t:%d\t\t%s", str, messageTypeToString(a), b, getAscTime(newtime).c_str());
+		snprintf(buf, sizeof(buf), "%s # %s \t: %s \t:%d\n", getAscTime(newtime).c_str(), str, messageTypeToString(a), b);
 	}
 	else if (a == SYNC_FLAG)
 	{
-		snprintf(buf, sizeof(buf), "%s \t: %d \t(Sync) \t%s", str, b, getAscTime(newtime).c_str());
+		snprintf(buf, sizeof(buf), "%s # %s \t: %d \t(Sync)\n", getAscTime(newtime).c_str(), str, b);
 	}
 	else
 	{
-		snprintf(buf, sizeof(buf), "%s \t:%d \t\t\t:%d\t\t%s", str, a, b, getAscTime(newtime).c_str());
+		snprintf(buf, sizeof(buf), "%s # %s \t:%d \t\t\t:%d\n", getAscTime(newtime).c_str(), str, a, b);
 	}
 
 	if (a == NET_PLAYER_LEAVING || a == NET_PLAYER_DROPPED)

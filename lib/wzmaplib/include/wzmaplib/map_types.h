@@ -24,7 +24,7 @@
 #include <vector>
 #include <memory>
 
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
@@ -41,6 +41,15 @@ enum class OutputFormat
 	VER3  // JSONv2 format + full-range game.map (WZ 4.1+)
 };
 constexpr OutputFormat LatestOutputFormat = OutputFormat::VER3;
+
+// MARK: - Map types
+
+enum class MapType
+{
+	CAMPAIGN,
+	SAVEGAME,
+	SKIRMISH
+};
 
 // MARK: - Handling game.map / MapData files
 
@@ -71,33 +80,30 @@ struct MapData
 
 struct WorldPos
 {
-	int x = 0;
-	int y = 0;
+	uint32_t x = 0;
+	uint32_t y = 0;
 };
 
-struct Structure
+struct Object
 {
-	optional<uint32_t> id;
 	std::string name;
 	WorldPos position;
 	uint16_t direction = 0;
+};
+struct Structure : public Object
+{
+	optional<uint32_t> id;
 	int8_t player = 0;  // -1 = scavs
 	uint8_t modules = 0; // capacity
 };
-struct Droid
+struct Droid : public Object
 {
 	optional<uint32_t> id;
-	std::string name;
-	WorldPos position;
-	uint16_t direction = 0;
 	int8_t player = 0;  // -1 = scavs
 };
-struct Feature
+struct Feature : public Object
 {
 	optional<uint32_t> id; // an explicit feature id# override, used by older formats
-	std::string name;
-	WorldPos position;
-	uint16_t direction = 0;
 	optional<int8_t> player;
 };
 

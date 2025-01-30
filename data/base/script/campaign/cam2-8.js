@@ -1,11 +1,11 @@
 include("script/campaign/libcampaign.js");
 include("script/campaign/templates.js");
 
-const COLLECTIVE_RES = [
+const mis_collectiveRes = [
 	"R-Defense-WallUpgrade06", "R-Struc-Materials06", "R-Sys-Engineering02",
 	"R-Vehicle-Engine06", "R-Vehicle-Metals06", "R-Cyborg-Metals06",
-	"R-Wpn-Cannon-Accuracy02", "R-Wpn-Cannon-Damage06","R-Wpn-Cannon-ROF03",
-	"R-Wpn-Flamer-Damage06", "R-Wpn-Flamer-ROF03", "R-Wpn-MG-Damage07",
+	"R-Wpn-Cannon-Accuracy02", "R-Wpn-Cannon-Damage06", "R-Wpn-Cannon-ROF03",
+	"R-Wpn-Flamer-Damage06", "R-Wpn-Flamer-ROF03", "R-Wpn-MG-Damage08",
 	"R-Wpn-MG-ROF03", "R-Wpn-Mortar-Acc02", "R-Wpn-Mortar-Damage06",
 	"R-Wpn-Mortar-ROF03", "R-Wpn-Rocket-Accuracy02", "R-Wpn-Rocket-Damage06",
 	"R-Wpn-Rocket-ROF03", "R-Wpn-RocketSlow-Accuracy03", "R-Wpn-RocketSlow-Damage06",
@@ -13,6 +13,18 @@ const COLLECTIVE_RES = [
 	"R-Wpn-Howitzer-Damage09", "R-Cyborg-Armor-Heat03", "R-Vehicle-Armor-Heat03",
 	"R-Wpn-Bomb-Damage02", "R-Wpn-AAGun-Damage03", "R-Wpn-AAGun-ROF03",
 	"R-Wpn-AAGun-Accuracy02", "R-Wpn-Howitzer-Accuracy02", "R-Struc-VTOLPad-Upgrade03",
+];
+const mis_collectiveResClassic = [
+	"R-Defense-WallUpgrade05", "R-Struc-Materials06", "R-Struc-Factory-Upgrade06",
+	"R-Struc-VTOLPad-Upgrade03", "R-Vehicle-Engine05", "R-Vehicle-Metals05",
+	"R-Cyborg-Metals06", "R-Vehicle-Armor-Heat02", "R-Cyborg-Armor-Heat02",
+	"R-Sys-Engineering02", "R-Wpn-Cannon-Accuracy02", "R-Wpn-Cannon-Damage06",
+	"R-Wpn-Cannon-ROF03", "R-Wpn-Flamer-Damage06", "R-Wpn-Flamer-ROF03",
+	"R-Wpn-Howitzer-Accuracy02", "R-Wpn-Howitzer-Damage03", "R-Sys-Sensor-Upgrade01",
+	"R-Wpn-MG-Damage07", "R-Wpn-MG-ROF03", "R-Wpn-Mortar-Acc02", "R-Wpn-Mortar-Damage06",
+	"R-Wpn-Mortar-ROF03", "R-Wpn-Rocket-Accuracy02", "R-Wpn-Rocket-Damage06",
+	"R-Wpn-Rocket-ROF03", "R-Wpn-RocketSlow-Accuracy03", "R-Wpn-RocketSlow-Damage06",
+	"R-Wpn-RocketSlow-ROF03"
 ];
 
 function vtolAttack()
@@ -24,12 +36,12 @@ function vtolAttack()
 
 function setupLandGroups()
 {
-	var hovers = enumArea("NWTankGroup", THE_COLLECTIVE, false).filter(function(obj) {
-		return obj.type === DROID && obj.propulsion === "hover01";
-	});
-	var tanks = enumArea("NWTankGroup", THE_COLLECTIVE, false).filter(function(obj) {
-		return obj.type === DROID && obj.propulsion !== "hover01";
-	});
+	const hovers = enumArea("NWTankGroup", CAM_THE_COLLECTIVE, false).filter((obj) => (
+		obj.type === DROID && obj.propulsion === tProp.tank.hover
+	));
+	const tanks = enumArea("NWTankGroup", CAM_THE_COLLECTIVE, false).filter((obj) => (
+		obj.type === DROID && obj.propulsion !== tProp.tank.hover
+	));
 
 	camManageGroup(camMakeGroup(hovers), CAM_ORDER_PATROL, {
 		pos: [
@@ -41,13 +53,16 @@ function setupLandGroups()
 		regroup: false,
 	});
 
-	camManageGroup(camMakeGroup(tanks), CAM_ORDER_DEFEND, {
-		pos: [
-			camMakePos("NWTankPos3"),
-		],
-		radius: 15,
+	camManageGroup(camMakeGroup(tanks), CAM_ORDER_ATTACK, {
 		regroup: false,
 	});
+
+	if (difficulty >= HARD)
+	{
+		camManageGroup(camMakeGroup("ETankGroup"), CAM_ORDER_ATTACK, {
+			regroup: false,
+		});
+	}
 
 	camManageGroup(camMakeGroup("WCyborgGroup"), CAM_ORDER_PATROL, {
 		pos: [
@@ -72,63 +87,83 @@ function enableFactories()
 
 function truckDefense()
 {
-	if (enumDroid(THE_COLLECTIVE, DROID_CONSTRUCT).length === 0)
+	if (enumDroid(CAM_THE_COLLECTIVE, DROID_CONSTRUCT).length === 0)
 	{
 		removeTimer("truckDefense");
 		return;
 	}
 
-	var list = ["Emplacement-Rocket06-IDF", "Emplacement-Howitzer150", "CO-Tower-HvATRkt", "CO-Tower-HVCan", "Sys-CB-Tower01"];
-	camQueueBuilding(THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos1"));
-	camQueueBuilding(THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos2"));
-	camQueueBuilding(THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos3"));
+	const list = ["Emplacement-Rocket06-IDF", "Emplacement-Howitzer150", "CO-Tower-HvATRkt", "CO-Tower-HVCan", "Sys-CB-Tower01"];
+	camQueueBuilding(CAM_THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos1"));
+	camQueueBuilding(CAM_THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos2"));
+	camQueueBuilding(CAM_THE_COLLECTIVE, list[camRand(list.length)], camMakePos("buildPos3"));
 }
 
 function eventStartLevel()
 {
-	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, "CAM_2END", {
+	camSetStandardWinLossConditions(CAM_VICTORY_OFFWORLD, cam_levels.betaEnd, {
 		area: "RTLZ",
 		reinforcements: camMinutesToSeconds(3),
 		annihilate: true
 	});
 
-	var startpos = getObject("startPosition");
-	var lz = getObject("landingZone"); //player lz
-	var tent = getObject("transporterEntry");
-	var text = getObject("transporterExit");
-	centreView(startpos.x, startpos.y);
+	const startPos = getObject("startPosition");
+	const lz = getObject("landingZone"); //player lz
+	const tEnt = getObject("transporterEntry");
+	const tExt = getObject("transporterExit");
+	centreView(startPos.x, startPos.y);
 	setNoGoArea(lz.x, lz.y, lz.x2, lz.y2, CAM_HUMAN_PLAYER);
-	startTransporterEntry(tent.x, tent.y, CAM_HUMAN_PLAYER);
-	setTransporterExit(text.x, text.y, CAM_HUMAN_PLAYER);
-
-	var enemyLz = getObject("COLandingZone");
-	setNoGoArea(enemyLz.x, enemyLz.y, enemyLz.x2, enemyLz.y2, THE_COLLECTIVE);
+	startTransporterEntry(tEnt.x, tEnt.y, CAM_HUMAN_PLAYER);
+	setTransporterExit(tExt.x, tExt.y, CAM_HUMAN_PLAYER);
 
 	camSetArtifacts({
 		"COVtolFac-b3": { tech: "R-Vehicle-Body09" }, //Tiger body
 		"COHeavyFacL-b2": { tech: "R-Wpn-HvyHowitzer" },
 	});
 
-	camCompleteRequiredResearch(COLLECTIVE_RES, THE_COLLECTIVE);
+	if (camClassicMode())
+	{
+		camClassicResearch(mis_collectiveResClassic, CAM_THE_COLLECTIVE);
+	}
+	else
+	{
+		camCompleteRequiredResearch(mis_collectiveRes, CAM_THE_COLLECTIVE);
+
+		camUpgradeOnMapTemplates(cTempl.commc, cTempl.cohhpv, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.comtath, cTempl.comltath, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybf, cTempl.cocybth, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybc, cTempl.cocybsn, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybr, cTempl.cocybtk, CAM_THE_COLLECTIVE);
+		camUpgradeOnMapTemplates(cTempl.npcybm, cTempl.cocybag, CAM_THE_COLLECTIVE);
+
+		//New AC Tiger tracked units for Hard and Insane difficulty
+		if (difficulty >= HARD)
+		{
+			addDroid(CAM_THE_COLLECTIVE, 30, 22, "AC Tiger Tracks", tBody.tank.tiger, tProp.tank.tracks, "", "", tWeap.tank.assaultCannon);
+			addDroid(CAM_THE_COLLECTIVE, 30, 23, "AC Tiger Tracks", tBody.tank.tiger, tProp.tank.tracks, "", "", tWeap.tank.assaultCannon);
+			addDroid(CAM_THE_COLLECTIVE, 31, 22, "AC Tiger Tracks", tBody.tank.tiger, tProp.tank.tracks, "", "", tWeap.tank.assaultCannon);
+			addDroid(CAM_THE_COLLECTIVE, 31, 23, "AC Tiger Tracks", tBody.tank.tiger, tProp.tank.tracks, "", "", tWeap.tank.assaultCannon);
+		}
+	}
 
 	camSetEnemyBases({
 		"COBase1": {
 			cleanup: "COBase1Cleanup",
 			detectMsg: "C28_BASE1",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"COBase2": {
 			cleanup: "COBase2Cleanup",
 			detectMsg: "C28_BASE2",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 		"COBase3": {
 			cleanup: "COBase3Cleanup",
 			detectMsg: "C28_BASE3",
-			detectSnd: "pcv379.ogg",
-			eliminateSnd: "pcv394.ogg",
+			detectSnd: cam_sounds.baseDetection.enemyBaseDetected,
+			eliminateSnd: cam_sounds.baseElimination.enemyBaseEradicated,
 		},
 	});
 
@@ -136,43 +171,43 @@ function eventStartLevel()
 		"COCyborgFac-b1": {
 			assembly: "COCyborgFac-b1Assembly",
 			order: CAM_ORDER_ATTACK,
-			groupSize: 5,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(30)),
+			groupSize: 4,
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 30 : 35)),
 			data: {
 				regroup: false,
 				repair: 40,
 				count: -1,
 			},
-			templates: [cTempl.cocybag, cTempl.npcybr, cTempl.npcybf, cTempl.npcybc]
+			templates: (!camClassicMode()) ? [cTempl.cocybag, cTempl.cocybtk] : [cTempl.cocybag, cTempl.npcybr, cTempl.npcybf, cTempl.npcybc]
 		},
 		"COHeavyFacL-b2": {
 			assembly: "COHeavyFacL-b2Assembly",
 			order: CAM_ORDER_ATTACK,
-			groupSize: 5,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(70)),
+			groupSize: 4,
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 70 : 75)),
 			data: {
 				regroup: false,
 				repair: 20,
 				count: -1,
 			},
-			templates: [cTempl.cohhpv, cTempl.cohact]
+			templates: (!camClassicMode()) ? [cTempl.cohhpv, cTempl.cohact] : [cTempl.comhpv, cTempl.cohact]
 		},
 		"COHeavyFacR-b2": {
 			assembly: "COHeavyFacR-b2Assembly",
 			order: CAM_ORDER_ATTACK,
-			groupSize: 5,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(50)),
+			groupSize: 6,
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 55 : 60)),
 			data: {
 				regroup: false,
 				repair: 20,
 				count: -1,
 			},
-			templates: [cTempl.comrotmh, cTempl.cohact]
+			templates: (!camClassicMode()) ? [cTempl.comrotmh, cTempl.cohact] : [cTempl.comrotmh, cTempl.cohct]
 		},
 		"COVtolFac-b3": {
 			order: CAM_ORDER_ATTACK,
 			groupSize: 4,
-			throttle: camChangeOnDiff(camSecondsToMilliseconds(70)),
+			throttle: camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 45 : 50)),
 			data: {
 				regroup: false,
 				count: -1,
@@ -181,11 +216,11 @@ function eventStartLevel()
 		},
 	});
 
-	camManageTrucks(THE_COLLECTIVE);
-	truckDefense();
+	camManageTrucks(CAM_THE_COLLECTIVE);
 
-	queue("setupLandGroups", camSecondsToMilliseconds(50));
-	queue("vtolAttack", camChangeOnDiff(camMinutesToMilliseconds(1.5)));
-	queue("enableFactories", camChangeOnDiff(camMinutesToMilliseconds(2.5)));
+	queue("setupLandGroups", camSecondsToMilliseconds(90));
+	queue("vtolAttack", camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 100 : 110)));
+	queue("enableFactories", camChangeOnDiff(camSecondsToMilliseconds((difficulty <= MEDIUM) ? 135 : 150)));
 	setTimer("truckDefense", camChangeOnDiff(camMinutesToMilliseconds(3)));
+	truckDefense();
 }

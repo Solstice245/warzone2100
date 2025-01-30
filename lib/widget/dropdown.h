@@ -24,26 +24,27 @@
 #ifndef __INCLUDED_LIB_WIDGET_DROPDOWN_H__
 #define __INCLUDED_LIB_WIDGET_DROPDOWN_H__
 
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 #include "widget.h"
 #include "scrollablelist.h"
 
 class DropdownItemWrapper;
 typedef std::function<void(std::shared_ptr<DropdownItemWrapper> item)> DropdownOnSelectHandler;
+class DropdownWidget;
 
 class DropdownItemWrapper: public WIDGET
 {
 protected:
 	DropdownItemWrapper() {}
 
-	void initialize(const std::shared_ptr<WIDGET> &newItem, DropdownOnSelectHandler newOnSelect);
+	void initialize(const std::shared_ptr<DropdownWidget>& parent, const std::shared_ptr<WIDGET> &newItem, DropdownOnSelectHandler newOnSelect);
 
 public:
-	static std::shared_ptr<DropdownItemWrapper> make(const std::shared_ptr<WIDGET> &item, DropdownOnSelectHandler onSelect)
+	static std::shared_ptr<DropdownItemWrapper> make(const std::shared_ptr<DropdownWidget>& parent, const std::shared_ptr<WIDGET> &item, DropdownOnSelectHandler onSelect)
 	{
 		class make_shared_enabler: public DropdownItemWrapper {};
 		auto widget = std::make_shared<make_shared_enabler>();
-		widget->initialize(item, onSelect);
+		widget->initialize(parent, item, onSelect);
 		return widget;
 	}
 
@@ -73,10 +74,16 @@ public:
 protected:
 	void display(int xOffset, int yOffset) override;
 
+protected:
+	friend class DropdownWidget;
+	void clearMouseDownState();
+
 private:
 	std::shared_ptr<WIDGET> item;
 	DropdownOnSelectHandler onSelect;
+	std::weak_ptr<DropdownWidget> parent;
 	bool selected = false;
+	bool mouseDownOnWrapper = false;
 };
 
 class DropdownWidget : public WIDGET
@@ -85,6 +92,7 @@ public:
 	DropdownWidget();
 
 	void addItem(const std::shared_ptr<WIDGET> &widget);
+	void clear();
 	void display(int xOffset, int yOffset) override;
 	void clicked(W_CONTEXT *psContext, WIDGET_KEY key) override;
 	void run(W_CONTEXT *) override;
@@ -96,14 +104,26 @@ public:
 	{
 		itemsList->setGeometry(itemsList->x(), itemsList->y(), itemsList->width(), value);
 	}
-	void setSelectedIndex(size_t index)
+	bool setSelectedIndex(size_t index)
 	{
-		ASSERT_OR_RETURN(, index < items.size(), "Invalid dropdown item index");
-		select(items[index]);
+		ASSERT_OR_RETURN(false, index < items.size(), "Invalid dropdown item index");
+		return select(items[index], index);
+	}
+	void setCanChange(std::function<bool(DropdownWidget&, size_t newIndex, std::shared_ptr<WIDGET>)> value)
+	{
+		canChange = value;
 	}
 	void setOnChange(std::function<void(DropdownWidget&)> value)
 	{
 		onChange = value;
+	}
+	std::shared_ptr<WIDGET> getItem(size_t idx) const
+	{
+		if (idx >= items.size())
+		{
+			return nullptr;
+		}
+		return items[idx]->getItem();
 	}
 	std::shared_ptr<WIDGET> getSelectedItem() const
 	{
@@ -141,18 +161,46 @@ public:
 		return itemsList->idealWidth();
 	}
 
+	int32_t idealHeight() override
+	{
+		auto max = 0;
+		for (auto const &item: items)
+		{
+			max = std::max(max, item->idealHeight());
+		}
+
+		return max;
+	}
+
+protected:
+	friend class DropdownItemWrapper;
+	void setMouseClickOnItem(std::shared_ptr<DropdownItemWrapper> item, WIDGET_KEY key, bool wasPressed);
+
 private:
 	std::vector<std::shared_ptr<DropdownItemWrapper>> items;
 	std::shared_ptr<ScrollableListWidget> itemsList;
 	std::shared_ptr<W_SCREEN> overlayScreen;
 	std::shared_ptr<DropdownItemWrapper> selectedItem;
+	std::function<bool(DropdownWidget&, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget)> canChange;
 	std::function<void(DropdownWidget&)> onChange;
+	std::shared_ptr<DropdownItemWrapper> mouseOverItem;
+	std::shared_ptr<DropdownItemWrapper> mouseDownItem;
+	int32_t overlayYPosOffset = 0;
 
-	void select(const std::shared_ptr<DropdownItemWrapper> &selected)
+	bool select(const std::shared_ptr<DropdownItemWrapper> &selected, size_t selectedIndex)
 	{
 		if (selectedItem == selected)
 		{
-			return;
+			return true;
+		}
+
+		if (canChange)
+		{
+			if (!canChange(*this, selectedIndex, (selected) ? selected->getItem() : nullptr))
+			{
+				// abort change
+				return false;
+			}
 		}
 
 		if (selectedItem)
@@ -166,6 +214,8 @@ private:
 		{
 			onChange(*this);
 		}
+
+		return true;
 	}
 
 	int calculateDropdownListScreenPosY() const;

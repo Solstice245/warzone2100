@@ -24,10 +24,14 @@ const BEACON_VTOL_ALARM = "vtolSpotted";
 //Research constants
 const TANK_ARMOR = [
 	"R-Vehicle-Metals09",
-	"R-Vehicle-Armor-Heat09",
 ];
 const CYBORG_ARMOR = [
 	"R-Cyborg-Metals09",
+];
+const TANK_ARMOR_THERMAL = [
+	"R-Vehicle-Armor-Heat09",
+];
+const CYBORG_ARMOR_THERMAL = [
 	"R-Cyborg-Armor-Heat09",
 ];
 const MODULE_RESEARCH = [
@@ -81,7 +85,7 @@ const SENSOR_TECH = [
 	"R-Sys-Resistance-Circuits",
 ];
 const DEFENSE_UPGRADES = [
-	"R-Struc-Materials09",
+	"R-Struc-Materials03",
 	"R-Defense-WallUpgrade12",
 ];
 const BODY_RESEARCH = [

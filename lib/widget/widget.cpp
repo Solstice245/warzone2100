@@ -51,12 +51,31 @@
 #include <unordered_set>
 #include <deque>
 
+static	bool	bWidgetsInitialized = false;
 static	bool	bWidgetsActive = true;
 
 /* The widget the mouse is over this update */
 static auto psMouseOverWidget = std::weak_ptr<WIDGET>();
 static auto psClickDownWidgetScreen = std::shared_ptr<W_SCREEN>();
 static auto psMouseOverWidgetScreen = std::shared_ptr<W_SCREEN>();
+
+struct WIDGET_KEYSTATE
+{
+public:
+	bool pressed = false;
+	W_CONTEXT dragStartPos = W_CONTEXT::ZeroContext();
+	W_CONTEXT dragLastPos = W_CONTEXT::ZeroContext();
+	std::shared_ptr<WIDGET> capturedDragWidget;
+public:
+	void reset()
+	{
+		pressed = false;
+		dragStartPos = W_CONTEXT::ZeroContext();
+		dragLastPos = W_CONTEXT::ZeroContext();
+		capturedDragWidget.reset();
+	}
+};
+static std::array<WIDGET_KEYSTATE, WKEY_SECONDARY + 1> widgetKeyCurrentState;
 
 static WIDGET_AUDIOCALLBACK AudioCallback = nullptr;
 static SWORD HilightAudioID = -1;
@@ -134,6 +153,7 @@ static inline void _widgDebugAssertIfRunningScreen(const char *function)
 /* Initialise the widget module */
 bool widgInitialise()
 {
+	bWidgetsInitialized = true;
 	tipInitialise();
 	return true;
 }
@@ -152,6 +172,10 @@ void widgShutDown(void)
 {
 	psClickDownWidgetScreen = nullptr;
 	psMouseOverWidgetScreen = nullptr;
+	for (auto& state : widgetKeyCurrentState)
+	{
+		state.reset();
+	}
 	tipShutdown();
 	overlays.clear();
 	overlaySet.clear();
@@ -169,6 +193,7 @@ void widgShutDown(void)
 		ASSERT(debugLiveWidgets.empty(), "There are %zu widgets that were not cleaned up.", debugLiveWidgets.size());
 	}
 #endif
+	bWidgetsInitialized = false;
 }
 
 void widgScheduleTask(std::function<void ()> task)
@@ -227,10 +252,24 @@ void widgRegisterOverlayScreenOnTopOfScreen(const std::shared_ptr<W_SCREEN> &psS
 	else
 	{
 		// priorScreen does not exist in the overlays list, so it is probably the "regular" screen
-		// just insert this overlay at the bottom of the overlay list
+		// so use z-order 0
 		OverlayScreen newOverlay {psScreen, 0};
-		overlays.insert(overlays.end(), newOverlay);
-		overlaySet.insert(psScreen);
+		it = std::find_if(overlays.begin(), overlays.end(), [](const OverlayScreen& overlay) -> bool {
+			return overlay.zOrder == 0;
+		});
+		if (it != overlays.end())
+		{
+			// found existing screen with z-order 0
+			// insert *before* it in the list (i.e. "above" it, since overlays are stored in decreasing z-order)
+			overlays.insert(it, newOverlay);
+			overlaySet.insert(psScreen);
+		}
+		else
+		{
+			// just insert this overlay at the bottom of the overlay list
+			overlays.insert(overlays.end(), newOverlay);
+			overlaySet.insert(psScreen);
+		}
 	}
 }
 
@@ -243,6 +282,13 @@ void widgRemoveOverlayScreen(const std::shared_ptr<W_SCREEN> &psScreen)
 	{
 		overlaysToDelete.insert(psScreen);
 	}
+}
+
+bool isRegisteredOverlayScreen(const std::shared_ptr<W_SCREEN> &psScreen)
+{
+	return std::any_of(overlays.begin(), overlays.end(), [psScreen](const OverlayScreen& overlay) -> bool {
+		return overlay.psScreen == psScreen;
+	});
 }
 
 static void cleanupDeletedOverlays()
@@ -340,7 +386,7 @@ static inline void forEachOverlayScreenBottomUp(const std::function<bool (const 
 
 void widgOverlaysScreenSizeDidChange(int oldWidth, int oldHeight, int newWidth, int newHeight)
 {
-	forEachOverlayScreen([oldWidth, oldHeight, newWidth, newHeight](const OverlayScreen& overlay) -> bool
+	forEachOverlayScreenBottomUp([oldWidth, oldHeight, newWidth, newHeight](const OverlayScreen& overlay) -> bool
 	{
 		overlay.psScreen->screenSizeDidChange(oldWidth, oldHeight, newWidth, newHeight);
 		return true; // keep enumerating
@@ -351,6 +397,11 @@ static bool isScreenARegisteredOverlay(const std::shared_ptr<W_SCREEN> &psScreen
 {
 	if (!psScreen) { return false; }
 	return overlaySet.count(psScreen) > 0;
+}
+
+bool isMouseOverScreen(const std::shared_ptr<W_SCREEN>& psScreen)
+{
+	return psMouseOverWidgetScreen == psScreen;
 }
 
 bool isMouseOverScreenOverlayChild(int mx, int my)
@@ -488,6 +539,16 @@ void WIDGET::setGeometry(WzRect const &r)
 	dirty = true;
 }
 
+void WIDGET::setGeometryFromScreenRect(WzRect const &r)
+{
+	auto strongParent = parent();
+	ASSERT_OR_RETURN(, strongParent != nullptr, "No parent - failed");
+	int xOffset = strongParent->screenPosX();
+	int yOffset = strongParent->screenPosY();
+	WzRect parentRelativeRect = WzRect(r.x() - xOffset, r.y() - yOffset, r.width(), r.height());
+	setGeometry(parentRelativeRect);
+}
+
 void WIDGET::screenSizeDidChange(int oldWidth, int oldHeight, int newWidth, int newHeight)
 {
 	// Default implementation of screenSizeDidChange calls its own calcLayout callback function (if present)
@@ -534,12 +595,22 @@ void WIDGET::setCustomHitTest(const WIDGET_HITTEST_FUNC& newCustomHitTestFunc)
 	customHitTest = newCustomHitTestFunc;
 }
 
-void WIDGET::attach(const std::shared_ptr<WIDGET> &widget)
+void WIDGET::attach(const std::shared_ptr<WIDGET> &widget, ChildZPos zPos /*= ChildZPos::Front*/)
 {
 	ASSERT_OR_RETURN(, widget != nullptr && widget->parentWidget.expired(), "Bad attach.");
 	widget->parentWidget = shared_from_this();
 	widget->setScreenPointer(screenPointer.lock());
-	childWidgets.push_back(widget);
+	switch (zPos)
+	{
+	case ChildZPos::Front:
+		// insert at the end of the list of children, and thus the top of the z-order (childWidgets order is bottom -> top)
+		childWidgets.push_back(widget);
+		break;
+	case ChildZPos::Back:
+		// insert at the very beginning of the list of children
+		childWidgets.insert(childWidgets.begin(), widget);
+		break;
+	}
 }
 
 void WIDGET::detach(const std::shared_ptr<WIDGET> &widget)
@@ -575,10 +646,12 @@ void WIDGET::setScreenPointer(const std::shared_ptr<W_SCREEN> &screen)
 		if (lockedScreen->hasFocus(*this))
 		{
 			lockedScreen->psFocus.reset();
+			this->focusLost();
 		}
 		if (lockedScreen->isLastHighlight(*this))
 		{
 			lockedScreen->lastHighlight.reset();
+			this->highlightLost();
 		}
 	}
 
@@ -602,7 +675,10 @@ W_SCREEN::~W_SCREEN()
 	if (auto focusedWidget = psFocus.lock())
 	{
 		// must trigger a resignation of focus
-		focusedWidget->focusLost();
+		if (bWidgetsInitialized) // do not call focusLost if widgets have already shutdown / are not initialized
+		{
+			focusedWidget->focusLost();
+		}
 	}
 	psFocus.reset();
 }
@@ -617,7 +693,7 @@ void W_SCREEN::initialize(const std::shared_ptr<W_FORM>& customRootForm)
 			customRootFormParent->detach(customRootForm);
 		}
 		psForm = customRootForm;
-		psForm->screenPointer = shared_from_this();
+		psForm->setScreenPointer(shared_from_this());
 		return;
 	}
 
@@ -636,7 +712,7 @@ void W_SCREEN::initialize(const std::shared_ptr<W_FORM>& customRootForm)
 void W_SCREEN::screenSizeDidChange(unsigned int oldWidth, unsigned int oldHeight, unsigned int newWidth, unsigned int newHeight)
 {
 	// resize the top-level form
-	psForm->setGeometry(0, 0, screenWidth - 1, screenHeight - 1);
+	psForm->setGeometry(0, 0, screenWidth, screenHeight);
 
 	// inform the top-level form of the event
 	psForm->screenSizeDidChange(oldWidth, oldHeight, newWidth, newHeight);
@@ -918,6 +994,11 @@ void WIDGET::setTip(std::string)
 	ASSERT(false, "Can't set widget type %u's tip.", type);
 }
 
+void WIDGET::setHelp(optional<WidgetHelp> help)
+{
+	ASSERT(false, "Can't set widget type %u's help.", type);
+}
+
 /* Set tip string for a widget */
 void widgSetTip(const std::shared_ptr<W_SCREEN> &psScreen, UDWORD id, std::string pTip)
 {
@@ -943,7 +1024,7 @@ UDWORD widgGetButtonKey_DEPRECATED(const std::shared_ptr<W_SCREEN> &psScreen)
 	return lastReleasedKey_DEPRECATED;
 }
 
-unsigned WIDGET::getState()
+unsigned WIDGET::getState() const
 {
 	ASSERT(false, "Can't get widget type %u's state.", type);
 	return 0;
@@ -1105,7 +1186,7 @@ void WIDGET::runRecursive(W_CONTEXT *psContext)
 	}
 }
 
-bool WIDGET::hitTest(int x, int y)
+bool WIDGET::hitTest(int x, int y) const
 {
 	// default hit-testing bounding rect (based on the widget's x, y, width, height)
 	bool hitTestResult = dim.contains(x, y);
@@ -1138,8 +1219,10 @@ bool WIDGET::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wa
 	if (!skipProcessingChildren)
 	{
 		// Process subwidgets.
-		for (auto const &psCurr: childWidgets)
+		// (Enumerate the child widgets in decreasing z-order (i.e. "top-down"))
+		for (auto i = childWidgets.size(); i--;)
 		{
+			auto const &psCurr = childWidgets[i];
 			if (!psCurr->visible() || !psCurr->hitTest(shiftedContext.mx, shiftedContext.my))
 			{
 				continue;  // Skip any hidden widgets, or widgets the click missed.
@@ -1212,10 +1295,17 @@ bool WIDGET::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wa
 	if (isMouseOverWidget())
 	{
 		auto psClickedWidget = shared_from_this();
+		W_CONTEXT clickedContext(psContext);
 		if (isTransparentToClicks)
 		{
 			do {
 				psClickedWidget = psClickedWidget->parent();
+				int shiftX = psClickedWidget->x();
+				int shiftY = psClickedWidget->y();
+				clickedContext.mx += shiftX;
+				clickedContext.my += shiftY;
+				clickedContext.xOffset -= shiftX;
+				clickedContext.yOffset -= shiftY;
 			} while (psClickedWidget != nullptr && psClickedWidget->isTransparentToClicks);
 			if (psClickedWidget == nullptr)
 			{
@@ -1224,12 +1314,17 @@ bool WIDGET::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wa
 		}
 		if (wasPressed)
 		{
-			psClickedWidget->clicked(psContext, key);
+			psClickedWidget->clicked(&clickedContext, key);
 			psClickDownWidgetScreen = psClickedWidget->screenPointer.lock();
+			if (psClickedWidget->capturesMouseDrag(key))
+			{
+				widgetKeyCurrentState[key].capturedDragWidget = psClickedWidget;
+				widgetKeyCurrentState[key].dragLastPos = widgetKeyCurrentState[key].dragStartPos = clickedContext.convertToScreenContext();
+			}
 		}
 		else
 		{
-			psClickedWidget->released(psContext, key);
+			psClickedWidget->released(&clickedContext, key);
 			psClickDownWidgetScreen.reset();
 		}
 		didProcessClick = true;
@@ -1238,6 +1333,45 @@ bool WIDGET::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wa
 	return didProcessClick;
 }
 
+void WIDGET::processMouseDragEvent(const W_CONTEXT &sContext, WIDGET_KEY wkey, WIDGET_KEYSTATE* pState, bool alsoTriggerReleased)
+{
+	bool dragPosChanged = !(pState->dragLastPos == sContext);
+	if (!dragPosChanged && !alsoTriggerReleased)
+	{
+		// no change since last event
+		return;
+	}
+
+	W_CONTEXT shiftedStartPos(pState->dragStartPos);
+	W_CONTEXT shiftedContext(sContext);
+	auto capturedWidgetParent = pState->capturedDragWidget->parent();
+	if (capturedWidgetParent)
+	{
+		auto parentScreenX = capturedWidgetParent->screenPosX();
+		auto parentScreenY = capturedWidgetParent->screenPosY();
+		shiftedStartPos.xOffset = parentScreenX;
+		shiftedStartPos.yOffset = parentScreenY;
+		shiftedStartPos.mx -= parentScreenX;
+		shiftedStartPos.my -= parentScreenY;
+		shiftedContext.xOffset = parentScreenX;
+		shiftedContext.yOffset = parentScreenY;
+		shiftedContext.mx -= parentScreenX;
+		shiftedContext.my -= parentScreenY;
+	}
+	if (dragPosChanged)
+	{
+		// Trigger a mouseDragged event for the widget
+		pState->capturedDragWidget->mouseDragged(wkey, &shiftedStartPos, &shiftedContext);
+		pState->dragLastPos = sContext;
+	}
+
+	if (alsoTriggerReleased)
+	{
+		// Trigger a released() call on the widget that captured the drag (to ensure it always gets one, even if the mouse was released off-widget)
+		pState->capturedDragWidget->released(&shiftedContext, wkey);
+		pState->capturedDragWidget.reset();
+	}
+}
 
 /* Execute a set of widgets for one cycle.
  * Returns a list of activated widgets.
@@ -1278,14 +1412,33 @@ WidgetTriggers const &widgRunScreen(const std::shared_ptr<W_SCREEN> &psScreen)
 			case MousePress::Release: pressed = false; break;
 			default: continue;
 			}
+
 			sContext.mx = c->pos.x;
 			sContext.my = c->pos.y;
 			bool didProcessClick = false;
-			forEachOverlayScreen([&sContext, &didProcessClick, wkey, pressed](const OverlayScreen& overlay) -> bool
+
+			if (!pressed || (pressed && widgetKeyCurrentState[wkey].capturedDragWidget != nullptr))
 			{
-				didProcessClick = overlay.psScreen->psForm->processClickRecursive(&sContext, wkey, pressed);
-				return !didProcessClick;
-			});
+				if (widgetKeyCurrentState[wkey].capturedDragWidget)
+				{
+					// Deliver a last mouseDragged event for the widget, with the final position sourced from this mousepress event, as well as a released event
+					WIDGET::processMouseDragEvent(sContext, wkey, &widgetKeyCurrentState[wkey], true);
+
+					// consume the release event - prevent it from going to another widget on top of which the mouse may have released
+					psClickDownWidgetScreen.reset();
+					didProcessClick = true;
+				}
+			}
+			widgetKeyCurrentState[wkey].pressed = pressed;
+
+			if (!didProcessClick)
+			{
+				forEachOverlayScreen([&sContext, &didProcessClick, wkey, pressed](const OverlayScreen& overlay) -> bool
+				{
+					didProcessClick = overlay.psScreen->psForm->processClickRecursive(&sContext, wkey, pressed);
+					return !didProcessClick;
+				});
+			}
 			if (!didProcessClick)
 			{
 				psScreen->psForm->processClickRecursive(&sContext, wkey, pressed);
@@ -1297,6 +1450,18 @@ WidgetTriggers const &widgRunScreen(const std::shared_ptr<W_SCREEN> &psScreen)
 
 	sContext.mx = mouseX();
 	sContext.my = mouseY();
+
+	// For each current key state
+	for (int key = WKEY_PRIMARY; key <= WKEY_SECONDARY; ++key)
+	{
+		// If widget_key is captured, and is down at the end of this batch of mouse events
+		if (widgetKeyCurrentState[key].pressed && widgetKeyCurrentState[key].capturedDragWidget)
+		{
+			// Trigger a mouseDragged event for the capture widget, with the final position (sourced from mouseX / mouseY)
+			WIDGET::processMouseDragEvent(sContext, static_cast<WIDGET_KEY>(key), &widgetKeyCurrentState[key], false);
+		}
+	}
+
 	bool didProcessClick = false;
 	forEachOverlayScreen([&sContext, &didProcessClick](const OverlayScreen& overlay) -> bool
 	{
@@ -1343,7 +1508,10 @@ void W_SCREEN::setReturn(const std::shared_ptr<WIDGET> &psWidget)
 
 void WIDGET::displayRecursive(WidgetGraphicsContext const &context)
 {
-	if (context.clipContains(geometry())) {
+	bool widgetIsClipped = !context.clipContains(geometry());
+
+	if (!widgetIsClipped)
+	{
 		if (debugBoundingBoxesOnly)
 		{
 			// Display bounding boxes.
@@ -1362,12 +1530,17 @@ void WIDGET::displayRecursive(WidgetGraphicsContext const &context)
 		}
 	}
 
+	if (widgetIsClipped && !context.allowChildDisplayRecursiveIfSelfClipped())
+	{
+		return;
+	}
+
 	if (type == WIDG_FORM && ((W_FORM *)this)->disableChildren)
 	{
 		return;
 	}
 
-	auto childrenContext = context.translatedBy(x(), y());
+	auto childrenContext = context.translatedBy(x(), y()).setAllowChildDisplayRecursiveIfSelfClipped(false);
 
 	// If this is a clickable form, the widgets on it have to move when it's down.
 	if (type == WIDG_FORM && (((W_FORM *)this)->style & WFORM_NOCLICKMOVE) == 0)
@@ -1380,6 +1553,9 @@ void WIDGET::displayRecursive(WidgetGraphicsContext const &context)
 	}
 
 	// Display the widgets on this widget.
+	// NOTE: Draw them in the opposite order that clicks are processed, so behavior matches the visual.
+	// i.e. Since processClickRecursive handles processing children in decreasing z-order (i.e. "top-down")
+	//      we want to draw things in list order (bottom-up) so the "top-most" is drawn last
 	for (auto const &child: childWidgets)
 	{
 		if (child->visible())
@@ -1405,6 +1581,8 @@ void widgDisplayScreen(const std::shared_ptr<W_SCREEN> &psScreen)
 	debugLoc = debugLoc[1] == -1 ? debugSequence : debugLoc[0] == debugCode ? debugLoc : debugLoc[1] == debugCode ? debugLoc + 1 : debugSequence;
 	debugBoundingBoxes = debugBoundingBoxes ^ (debugLoc[1] == -1);
 
+	bool skipDrawing = !gfx_api::context::get().shouldDraw();
+
 	cleanupDeletedOverlays();
 
 	/* Process any user callback functions */
@@ -1413,23 +1591,32 @@ void widgDisplayScreen(const std::shared_ptr<W_SCREEN> &psScreen)
 	sContext.my = mouseY();
 	psScreen->psForm->processCallbacksRecursive(&sContext);
 
-	// Display the widgets.
-	psScreen->psForm->displayRecursive();
+	if (!skipDrawing)
+	{
+		// Display the widgets.
+		psScreen->psForm->displayRecursive();
+	}
 
 	// Always overlays on-top (i.e. draw them last)
-	forEachOverlayScreenBottomUp([&sContext](const OverlayScreen& overlay) -> bool
+	forEachOverlayScreenBottomUp([&sContext, skipDrawing](const OverlayScreen& overlay) -> bool
 	{
 		overlay.psScreen->psForm->processCallbacksRecursive(&sContext);
-		overlay.psScreen->psForm->displayRecursive();
+		if (!skipDrawing)
+		{
+			overlay.psScreen->psForm->displayRecursive();
+		}
 		return true;
 	}); // <- enumerate in *increasing* z-order for drawing
 
 	deleteOldWidgets();  // Delete any widgets that called deleteLater() while being displayed.
 
-	/* Display the tool tip if there is one */
-	tipDisplay();
+	if (!skipDrawing)
+	{
+		/* Display the tool tip if there is one */
+		tipDisplay();
+	}
 
-	if (debugBoundingBoxes)
+	if (debugBoundingBoxes && !skipDrawing)
 	{
 		debugBoundingBoxesOnly = true;
 		psScreen->psForm->displayRecursive();
@@ -1441,9 +1628,20 @@ void W_SCREEN::setFocus(const std::shared_ptr<WIDGET> &widget)
 {
 	if (auto locked = psFocus.lock())
 	{
-		locked->focusLost();
+		if (locked == widget)
+		{
+			return; // do nothing - no change
+		}
+		psFocus = widget;
+		if (bWidgetsInitialized) // do not call focusLost if widgets have already shutdown / are not initialized
+		{
+			locked->focusLost();
+		}
 	}
-	psFocus = widget;
+	else
+	{
+		psFocus = widget;
+	}
 }
 
 void WidgSetAudio(WIDGET_AUDIOCALLBACK Callback, SWORD HilightID, SWORD ClickedID, SWORD ErrorID)
@@ -1516,7 +1714,20 @@ WidgetGraphicsContext WidgetGraphicsContext::clippedBy(WzRect const &newRect) co
 	return newContext;
 }
 
+WidgetGraphicsContext WidgetGraphicsContext::setAllowChildDisplayRecursiveIfSelfClipped(bool val) const
+{
+	WidgetGraphicsContext newContext(*this);
+
+	newContext.allowChildDisplayIfSelfClipped = true;
+	return newContext;
+}
+
 std::weak_ptr<WIDGET> getMouseOverWidget()
 {
 	return psMouseOverWidget;
+}
+
+std::chrono::milliseconds widgGetClickHoldMS()
+{
+	return std::chrono::milliseconds(2000); // TODO: Make this configurable?
 }

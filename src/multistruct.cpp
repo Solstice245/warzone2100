@@ -120,30 +120,10 @@ bool recvBuildFinished(NETQUEUE queue)
 	// Find the structures stats
 	for (typeindex = 0; typeindex < numStructureStats && asStructureStats[typeindex].ref != type; typeindex++) {}	// Find structure target
 
-	// Check for similar buildings, to avoid overlaps
-	if (TileHasStructure(mapTile(map_coord(pos.x), map_coord(pos.y))))
-	{
-		// Get the current structure
-		psStruct = getTileStructure(map_coord(pos.x), map_coord(pos.y));
-		if (asStructureStats[typeindex].type == psStruct->pStructureType->type)
-		{
-			// Correct type, correct location, just rename the id's to sync it.. (urgh)
-			psStruct->id = structId;
-			psStruct->status = SS_BUILT;
-			buildingComplete(psStruct);
-			debug(LOG_SYNC, "Created modified building %u for player %u", psStruct->id, player);
-#if defined (DEBUG)
-			NETlogEntry("structure id modified", SYNC_FLAG, player);
-#endif
-			return true;
-		}
-	}
 	// Build the structure
-	psStruct = buildStructure(&(asStructureStats[typeindex]), pos.x, pos.y, player, true);
-
+	psStruct = buildStructureDir(&(asStructureStats[typeindex]), pos.x, pos.y, 0, player, true, structId);
 	if (psStruct)
 	{
-		psStruct->id		= structId;
 		psStruct->status	= SS_BUILT;
 		buildingComplete(psStruct);
 		debug(LOG_SYNC, "Huge synch error, forced to create building %u for player %u", psStruct->id, player);
@@ -245,11 +225,11 @@ bool recvLasSat(NETQUEUE queue)
 		return false;
 	}
 
-	if (psStruct && psObj && psStruct->pStructureType->psWeapStat[0]->weaponSubClass == WSC_LAS_SAT)
+	if (psStruct && psObj && isLasSat(psStruct->pStructureType))
 	{
 		// Lassats have just one weapon
-		unsigned firePause = weaponFirePause(&asWeaponStats[psStruct->asWeaps[0].nStat], player);
-		unsigned damLevel = PERCENT(psStruct->body, structureBody(psStruct));
+		unsigned firePause = weaponFirePause(*psStruct->getWeaponStats(0), player);
+		unsigned damLevel = PERCENT(psStruct->body, psStruct->structureBody());
 
 		if (damLevel < HEAVY_DAMAGE_LEVEL)
 		{
@@ -373,7 +353,7 @@ void recvStructureInfo(NETQUEUE queue)
 		return;
 	}
 
-	if (StructIsFactory(psStruct))
+	if (psStruct->isFactory())
 	{
 		popStatusPending(psStruct->pFunctionality->factory);
 	}

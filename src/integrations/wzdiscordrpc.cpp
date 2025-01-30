@@ -1,6 +1,6 @@
 /*
 	This file is part of Warzone 2100.
-	Copyright (C) 2020  Warzone 2100 Project
+	Copyright (C) 2020-2022  Warzone 2100 Project
 
 	Warzone 2100 is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -40,13 +40,18 @@
 #include <discord_rpc.h>
 #include <sodium.h>
 #include <EmbeddedJSONSignature.h>
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
 
-static const char* APPID = "505520727521361941";
+#include <wz-discord-config.h>
+#if !defined(WZ_DISCORD_RPC_APPID)
+# define WZ_DISCORD_RPC_APPID ""
+#endif
+
 static const size_t MAX_DISCORD_STR_LEN = 127; // 128 - 1 (for null terminator)
 
+static bool discordRPCEnabled = false;
 static bool presenceUpdatesEnabled = true;
 static std::unordered_map<std::string, std::chrono::system_clock::time_point> lastDismissedJoinRequestByUserId;
 #define WZ_DISCORD_JOIN_SPAM_INTERVAL_SECS 60
@@ -91,7 +96,7 @@ static void asyncGetDiscordDefaultUserAvatar(const std::string& discord_user_dis
 		std::vector<unsigned char> memoryBuffer((unsigned char *)data->memory, ((unsigned char*)data->memory) + data->size);
 		callback(memoryBuffer);
 	};
-	urlRequest.onFailure = [callback](const std::string& url, URLRequestFailureType type, optional<HTTPResponseDetails> transferDetails) {
+	urlRequest.onFailure = [callback](const std::string& url, URLRequestFailureType type, std::shared_ptr<HTTPResponseDetails> transferDetails) {
 		callback(nullopt);
 	};
 	urlRequest.maxDownloadSizeLimit = 4 * 1024 * 1024; // response should never be > 4 MB
@@ -144,7 +149,7 @@ static void asyncGetDiscordUserAvatar(const DiscordUser* request, const std::fun
 		std::vector<unsigned char> memoryBuffer((unsigned char *)data->memory, ((unsigned char*)data->memory) + data->size);
 		callback(memoryBuffer);
 	};
-	urlRequest.onFailure = [callback, discord_user_discriminator](const std::string& url, URLRequestFailureType type, optional<HTTPResponseDetails> transferDetails) {
+	urlRequest.onFailure = [callback, discord_user_discriminator](const std::string& url, URLRequestFailureType type, std::shared_ptr<HTTPResponseDetails> transferDetails) {
 		// fallback
 		asyncGetDiscordDefaultUserAvatar(discord_user_discriminator, callback);
 	};
@@ -204,11 +209,8 @@ static void joinGameImpl(const std::vector<JoinConnectionDescription>& joinConne
 	NETinit(true);
 	// Ensure the joinGame has a place to return to
 	changeTitleMode(TITLE);
-	JoinGameResult result = joinGame(joinConnectionDetails);
-	if (result != JoinGameResult::JOINED)
-	{
-		cancelOrDismissNotificationsWithTag(JOIN_FIND_AND_CONNECT_TAG);
-	}
+	joinGame(joinConnectionDetails);
+	cancelOrDismissNotificationsWithTag(JOIN_FIND_AND_CONNECT_TAG);
 }
 
 static void findAndJoinLobbyGameImpl(const std::string& lobbyAddress, unsigned int lobbyPort, uint32_t lobbyGameId)
@@ -220,45 +222,47 @@ static void findAndJoinLobbyGameImpl(const std::string& lobbyAddress, unsigned i
 	contentStr += "\n\n";
 	contentStr += _("This may take a moment...");
 	notification.contentText = contentStr;
-	notification.onDisplay = [lobbyAddress, lobbyPort, lobbyGameId](const WZ_Notification&) {
+	std::string lobbyAddressCopy = lobbyAddress;
+	notification.onDisplay = [lobbyAddressCopy, lobbyPort, lobbyGameId](const WZ_Notification&) {
 		// once the notification is completely displayed, trigger the lookup & join
+		wzAsyncExecOnMainThread([lobbyAddressCopy, lobbyPort, lobbyGameId]() {
+			const auto currentGameMode = ActivityManager::instance().getCurrentGameMode();
+			if (currentGameMode != ActivitySink::GameMode::MENUS)
+			{
+				// Can't join a game while in a game - abort
+				cancelOrDismissNotificationsWithTag(JOIN_FIND_AND_CONNECT_TAG);
+				displayCantJoinWhileInGameNotification();
+				return;
+			}
 
-		const auto currentGameMode = ActivityManager::instance().getCurrentGameMode();
-		if (currentGameMode != ActivitySink::GameMode::MENUS)
-		{
-			// Can't join a game while in a game - abort
-			cancelOrDismissNotificationsWithTag(JOIN_FIND_AND_CONNECT_TAG);
-			displayCantJoinWhileInGameNotification();
-			return;
-		}
+			// For now, it is necessary to call `NETinit(true)` before calling findLobbyGame
+			// Obviously this wouldn't be a good idea to do *during* a game, hence the check above to
+			// ensure we're still in the menus...
+			NETinit(true);
+			ingame.side = InGameSide::MULTIPLAYER_CLIENT;
+			auto joinConnectionDetails = findLobbyGame(lobbyAddressCopy, lobbyPort, lobbyGameId);
 
-		// For now, it is necessary to call `NETinit(true)` before calling findLobbyGame
-		// Obviously this wouldn't be a good idea to do *during* a game, hence the check above to
-		// ensure we're still in the menus...
-		NETinit(true);
-		ingame.side = InGameSide::MULTIPLAYER_CLIENT;
-		auto joinConnectionDetails = findLobbyGame(lobbyAddress, lobbyPort, lobbyGameId);
+			if (joinConnectionDetails.empty())
+			{
+				cancelOrDismissNotificationsWithTag(JOIN_FIND_AND_CONNECT_TAG);
+				debug(LOG_ERROR, "Join code: Failed to find game in the lobby server: %s:%u", lobbyAddressCopy.c_str(), lobbyPort);
+				std::string contentText = _("Failed to find game in the lobby server: ");
+				contentText += lobbyAddressCopy + ":" + std::to_string(lobbyPort) + "\n\n";
+				contentText += _("The game may have already started, or the host may have disbanded the game lobby.");
+				WZ_Notification notification;
+				notification.duration = 0;
+				notification.contentTitle = _("Failed to Find Game");
+				notification.contentText = contentText;
+				notification.largeIcon = WZ_Notification_Image("images/notifications/exclamation_triangle.png");
+				notification.tag = std::string(JOIN_NOTIFICATION_TAG_PREFIX "failedtoconnect");
+				addNotification(notification, WZ_Notification_Trigger::Immediate());
+				return;
+			}
 
-		if (joinConnectionDetails.empty())
-		{
-			cancelOrDismissNotificationsWithTag(JOIN_FIND_AND_CONNECT_TAG);
-			debug(LOG_ERROR, "Join code: Failed to find game in the lobby server: %s:%u", lobbyAddress.c_str(), lobbyPort);
-			std::string contentText = _("Failed to find game in the lobby server: ");
-			contentText += lobbyAddress + ":" + std::to_string(lobbyPort) + "\n\n";
-			contentText += _("The game may have already started, or the host may have disbanded the game lobby.");
-			WZ_Notification notification;
-			notification.duration = 0;
-			notification.contentTitle = _("Failed to Find Game");
-			notification.contentText = contentText;
-			notification.largeIcon = WZ_Notification_Image("images/notifications/exclamation_triangle.png");
-			notification.tag = std::string(JOIN_NOTIFICATION_TAG_PREFIX "failedtoconnect");
-			addNotification(notification, WZ_Notification_Trigger::Immediate());
-			return;
-		}
+			ActivityManager::instance().willAttemptToJoinLobbyGame(lobbyAddressCopy, lobbyPort, lobbyGameId, joinConnectionDetails);
 
-		ActivityManager::instance().willAttemptToJoinLobbyGame(lobbyAddress, lobbyPort, lobbyGameId, joinConnectionDetails);
-
-		joinGameImpl(joinConnectionDetails);
+			joinGameImpl(joinConnectionDetails);
+		});
 	};
 	notification.largeIcon = WZ_Notification_Image("images/notifications/connect_wait.png");
 	notification.tag = JOIN_FIND_AND_CONNECT_TAG;
@@ -648,6 +652,11 @@ public:
 		updateDiscordPresence();
 	}
 
+	virtual void gameExiting() override
+	{
+		Discord_ClearPresence();
+	}
+
 public:
 
 	void processQueuedPresenceUpdate();
@@ -732,16 +741,36 @@ void DiscordRPCActivitySink::setJoinInformation(const ActivitySink::MultiplayerG
 				{
 					return;
 				}
+
+				const std::string* pExternalIPv4Address = nullptr;
+				unsigned int externalIPv4Port = 0;
+
+				// Prefer external IP information acquired from port-mapping, if available
+				for (const auto& extAddress : listeningInterfaces.knownExternalAddresses)
+				{
+					if (extAddress.type == ListeningInterfaces::IPType::IPv4 && !pExternalIPv4Address)
+					{
+						pExternalIPv4Address = &extAddress.ipAddress;
+						externalIPv4Port = extAddress.port;
+					}
+				}
+
+				if (pExternalIPv4Address == nullptr)
+				{
+					pExternalIPv4Address = &ipv4Address;
+					externalIPv4Port = listeningInterfaces.ipv4_port;
+				}
+
 				// Convert ip address strings to binary, in network-byte-order format, then base64-encode
 				// Append the port as a separate string component
 				std::string joinSecretDetails;
-				if (!ipv4Address.empty())
+				if (!pExternalIPv4Address->empty())
 				{
-					auto ipv4AddressBinaryForm = ipv4_AddressString_To_NetBinary(ipv4Address);
+					auto ipv4AddressBinaryForm = ipv4_AddressString_To_NetBinary(*pExternalIPv4Address);
 					if (!ipv4AddressBinaryForm.empty())
 					{
 						joinSecretDetails += b64Tob64UrlSafe(EmbeddedJSONSignature::b64Encode(ipv4AddressBinaryForm));
-						joinSecretDetails += std::string(":") + std::to_string(listeningInterfaces.ipv4_port);
+						joinSecretDetails += std::string(":") + std::to_string(externalIPv4Port);
 					}
 				}
 				if (!ipv6Address.empty())
@@ -773,7 +802,7 @@ void DiscordRPCActivitySink::setJoinInformation(const ActivitySink::MultiplayerG
 				std::string joinSecretStr = std::string("v1/i/") + uniqueGameStr + "/" + joinSecretDetails;
 
 				// construct a unique party id from the uniqueGameStr + ip addresses, hashed
-				std::string rawPartyId = std::string("direct_connection:") + uniqueGameStr + ":" + ipv4Address + ":" + std::to_string(listeningInterfaces.ipv4_port) + ":" + ipv6Address + ":" + std::to_string(listeningInterfaces.ipv6_port);
+				std::string rawPartyId = std::string("direct_connection:") + uniqueGameStr + ":" + *pExternalIPv4Address + ":" + std::to_string(externalIPv4Port) + ":" + ipv6Address + ":" + std::to_string(listeningInterfaces.ipv6_port);
 				std::string partyIdStr = hashAndB64EncodePartyId(rawPartyId);
 
 				wzAsyncExecOnMainThread([pSink, joinSecretStr, partyIdStr](){
@@ -1089,8 +1118,13 @@ static void handleDiscordJoinRequest(const DiscordUser* request)
 
 // MARK: - Initializing sub-system
 
-static void discordInit()
+static bool discordInit()
 {
+	if (strlen(WZ_DISCORD_RPC_APPID) == 0)
+	{
+		debug(LOG_WZ, "Insufficient configuration to enable Discord RPC");
+		return false;
+	}
 	DiscordEventHandlers handlers;
 	memset(&handlers, 0, sizeof(handlers));
 	handlers.ready = handleDiscordReady;
@@ -1099,17 +1133,23 @@ static void discordInit()
 	handlers.joinGame = handleDiscordJoin;
 	handlers.spectateGame = handleDiscordSpectate;
 	handlers.joinRequest = handleDiscordJoinRequest;
-	Discord_Initialize(APPID, &handlers, 1, nullptr);
+	Discord_Initialize(WZ_DISCORD_RPC_APPID, &handlers, 1, nullptr);
+	return true;
 }
 
 void discordRPCInitialize()
 {
-	discordInit();
+	if (!discordInit())
+	{
+		discordRPCEnabled = false;
+		return;
+	}
 	if (!discordSink)
 	{
 		discordSink = std::make_shared<DiscordRPCActivitySink>();
 		ActivityManager::instance().addActivitySink(discordSink);
 	}
+	discordRPCEnabled = true;
 }
 
 static uint32_t framesSinceLastProcessedCallbacks = 0;
@@ -1119,6 +1159,11 @@ static uint32_t remainingInitialFastChecks = 20;
 
 void discordRPCPerFrame()
 {
+	if (!discordRPCEnabled)
+	{
+		return;
+	}
+
 	if (discordSink)
 	{
 		discordSink->processQueuedPresenceUpdate();
@@ -1164,6 +1209,11 @@ void discordRPCPerFrame()
 
 void discordRPCShutdown()
 {
+	if (!discordRPCEnabled)
+	{
+		return;
+	}
+	discordRPCEnabled = false;
 	if (discordSink)
 	{
 		ActivityManager::instance().removeActivitySink(discordSink);

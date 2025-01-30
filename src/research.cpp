@@ -27,7 +27,7 @@
 #include <map>
 
 #include "lib/framework/frame.h"
-#include "lib/netplay/netplay.h"
+#include "lib/netplay/sync_debug.h"
 #include "lib/ivis_opengl/imd.h"
 #include "objects.h"
 #include "lib/gamelib/gtime.h"
@@ -50,8 +50,12 @@
 
 // The stores for the research stats
 std::vector<RESEARCH> asResearch;
+optional<ResearchUpgradeCalculationMode> researchUpgradeCalcMode;
 nlohmann::json cachedStatsObject = nlohmann::json(nullptr);
 std::vector<wzapi::PerPlayerUpgrades> cachedPerPlayerUpgrades;
+
+typedef std::unordered_map<std::string, std::unordered_map<std::string, int64_t>> RawResearchUpgradeChangeValues;
+std::array<RawResearchUpgradeChangeValues, MAX_PLAYERS> cachedPerPlayerRawUpgradeChange;
 
 //used for Callbacks to say which topic was last researched
 RESEARCH                *psCBLastResearch;
@@ -88,9 +92,9 @@ static bool checkResearchName(RESEARCH *psRes, UDWORD numStats);
 
 //flag that indicates whether the player can self repair
 static UBYTE bSelfRepair[MAX_PLAYERS];
-static void replaceDroidComponent(DROID *pList, UDWORD oldType, UDWORD oldCompInc,
+static void replaceDroidComponent(DroidList& pList, UDWORD oldType, UDWORD oldCompInc,
                                   UDWORD newCompInc);
-static void replaceStructureComponent(STRUCTURE *pList, UDWORD oldType, UDWORD oldCompInc,
+static void replaceStructureComponent(StructureList& pList, UDWORD oldType, UDWORD oldCompInc,
                                       UDWORD newCompInc, UBYTE player);
 static void switchComponent(DROID *psDroid, UDWORD oldType, UDWORD oldCompInc,
                             UDWORD newCompInc);
@@ -105,6 +109,7 @@ bool researchInitVars()
 	psCBLastResStructure = nullptr;
 	CBResFacilityOwner = -1;
 	asResearch.clear();
+	researchUpgradeCalcMode = nullopt;
 	cachedStatsObject = nlohmann::json(nullptr);
 	cachedPerPlayerUpgrades.clear();
 	playerUpgradeCounts = std::vector<PlayerUpgradeCounts>(MAX_PLAYERS);
@@ -118,6 +123,12 @@ bool researchInitVars()
 	}
 
 	return true;
+}
+
+ResearchUpgradeCalculationMode getResearchUpgradeCalcMode()
+{
+	// Default to ResearchUpgradeCalculationMode::Compat, unless otherwise specified
+	return researchUpgradeCalcMode.value_or(ResearchUpgradeCalculationMode::Compat);
 }
 
 uint32_t PlayerUpgradeCounts::getNumWeaponImpactClassUpgrades(WEAPON_SUBCLASS subClass)
@@ -240,10 +251,41 @@ public:
 	}
 };
 
+static optional<ResearchUpgradeCalculationMode> resCalcModeStringToValue(const WzString& calcModeStr)
+{
+	if (calcModeStr.compare("compat") == 0)
+	{
+		return ResearchUpgradeCalculationMode::Compat;
+	}
+	else if (calcModeStr.compare("improved") == 0)
+	{
+		return ResearchUpgradeCalculationMode::Improved;
+	}
+	else
+	{
+		return nullopt;
+	}
+}
+
+static const char* resCalcModeToString(ResearchUpgradeCalculationMode mode)
+{
+	switch (mode)
+	{
+		case ResearchUpgradeCalculationMode::Compat:
+			return "compat";
+		case ResearchUpgradeCalculationMode::Improved:
+			return "improved";
+	}
+	return "invalid";
+}
+
+#define RESEARCH_JSON_CONFIG_DICT_KEY "_config_"
+
 /** Load the research stats */
 bool loadResearch(WzConfig &ini)
 {
 	ASSERT(ini.isAtDocumentRoot(), "WzConfig instance is in the middle of traversal");
+	const WzString CONFIG_DICT_KEY_STR = RESEARCH_JSON_CONFIG_DICT_KEY;
 	std::vector<WzString> list = ini.childGroups();
 	PLAYER_RESEARCH dummy;
 	memset(&dummy, 0, sizeof(dummy));
@@ -251,6 +293,38 @@ bool loadResearch(WzConfig &ini)
 	preResearch.resize(list.size());
 	for (size_t inc = 0; inc < list.size(); ++inc)
 	{
+		if (list[inc] == CONFIG_DICT_KEY_STR)
+		{
+			// handle the special config dict
+			ini.beginGroup(list[inc]);
+
+			// calculationMode
+			auto calcModeStr = ini.value("calculationMode", resCalcModeToString(ResearchUpgradeCalculationMode::Compat)).toWzString();
+			auto calcModeParsed = resCalcModeStringToValue(calcModeStr);
+			if (calcModeParsed.has_value())
+			{
+				if (!researchUpgradeCalcMode.has_value())
+				{
+					researchUpgradeCalcMode = calcModeParsed.value();
+				}
+				else
+				{
+					if (researchUpgradeCalcMode.value() != calcModeParsed.value())
+					{
+						debug(LOG_ERROR, "Non-matching research JSON calculationModes");
+						debug(LOG_INFO, "Research JSON file \"%s\" has specified a calculationMode (\"%s\") that does not match the first loaded research JSON's calculationMode (\"%s\")", ini.fileName().toUtf8().c_str(), calcModeStr.toUtf8().c_str(), resCalcModeToString(researchUpgradeCalcMode.value()));
+					}
+				}
+			}
+			else
+			{
+				ASSERT_OR_RETURN(false, false, "Invalid _config_ \"calculationMode\" value: \"%s\"", calcModeStr.toUtf8().c_str());
+			}
+
+			ini.endGroup();
+			continue;
+		}
+
 		// HACK FIXME: the code assumes we have empty PLAYER_RESEARCH entries to throw around
 		for (auto &j : asPlayerResList)
 		{
@@ -291,6 +365,18 @@ bool loadResearch(WzConfig &ini)
 		else
 		{
 			research.keyTopic = 0;
+		}
+
+		//special flag to not reveal research from "give all" and not to research with "research all" cheats
+		unsigned int excludeFromCheats = ini.value("excludeFromCheats", 0).toUInt();
+		ASSERT(excludeFromCheats <= 1, "Invalid excludeFromCheats for research topic - '%s' ", getStatsName(&research));
+		if (excludeFromCheats <= 1)
+		{
+			research.excludeFromCheats = ini.value("excludeFromCheats", 0).toUInt();
+		}
+		else
+		{
+			research.excludeFromCheats = 0;
 		}
 
 		//set tech code
@@ -501,6 +587,12 @@ bool loadResearch(WzConfig &ini)
 		return false;
 	}
 
+	// If the first research json file does not explicitly set calculationMode, default to compat
+	if (!researchUpgradeCalcMode.has_value())
+	{
+		researchUpgradeCalcMode = ResearchUpgradeCalculationMode::Compat;
+	}
+
 	return true;
 }
 
@@ -663,6 +755,14 @@ static inline int64_t iDivCeil(int64_t dividend, int64_t divisor)
 	return (dividend / divisor) + static_cast<int64_t>((dividend % divisor != 0 && hasPosQuotient));
 }
 
+static inline int64_t iDivFloor(int64_t dividend, int64_t divisor)
+{
+	ASSERT_OR_RETURN(0, divisor != 0, "Divide by 0");
+	bool hasNegQuotient = (dividend >= 0) != (divisor >= 0);
+	// C++11 defines the behavior of % to be truncated
+	return (dividend / divisor) - static_cast<int64_t>((dividend % divisor != 0 && hasNegQuotient));
+}
+
 static void eventResearchedHandleUpgrades(const RESEARCH *psResearch, const STRUCTURE *psStruct, int player)
 {
 	if (cachedStatsObject.is_null()) { cachedStatsObject = wzapi::constructStatsObject(); }
@@ -672,6 +772,8 @@ static void eventResearchedHandleUpgrades(const RESEARCH *psResearch, const STRU
 	debug(LOG_RESEARCH, "RESEARCH : %s(%s) for %d", psResearch->name.toUtf8().c_str(), psResearch->id.toUtf8().c_str(), player);
 
 	ASSERT_OR_RETURN(, player >= 0 && player < cachedPerPlayerUpgrades.size(), "Player %d does not exist in per-player upgrades?", player);
+	auto &playerRawUpgradeChangeTotals = cachedPerPlayerRawUpgradeChange[player];
+	const auto upgradeCalcMode = getResearchUpgradeCalcMode();
 
 	PlayerUpgradeCounts tempStats;
 
@@ -789,7 +891,8 @@ static void eventResearchedHandleUpgrades(const RESEARCH *psResearch, const STRU
 						continue;
 					}
 					int64_t currentUpgradesValue = currentUpgradesValue_json.get<int64_t>();
-					int64_t newUpgradesChange = iDivCeil((statsOriginalValueX.get<int64_t>() * value), 100);
+					int64_t scaledChange = (statsOriginalValueX.get<int64_t>() * value);
+					int64_t newUpgradesChange = (value < 0) ? iDivFloor(scaledChange, 100) : iDivCeil(scaledChange, 100);
 					int64_t newUpgradesValue = (currentUpgradesValue + newUpgradesChange);
 					if (currentUpgradesValue_json.is_number_unsigned())
 					{
@@ -820,8 +923,29 @@ static void eventResearchedHandleUpgrades(const RESEARCH *psResearch, const STRU
 					continue;
 				}
 				int64_t currentUpgradesValue = currentUpgradesValue_json.get<int64_t>();
-				int64_t newUpgradesChange = iDivCeil((statsOriginalValue * value), 100);
-				int64_t newUpgradesValue = (currentUpgradesValue + newUpgradesChange);
+				int64_t scaledChange = (statsOriginalValue * value);
+				int64_t newUpgradesChange = 0;
+				int64_t newUpgradesValue = 0;
+				switch (upgradeCalcMode)
+				{
+					case ResearchUpgradeCalculationMode::Compat:
+						// Default / compat cumulative upgrade handling (the only option for many years - from at least 3.x/(3.2+?)-4.4.2?)
+						// This can accumulate noticeable error, especially if repeatedly upgrading small values by small percentages (commonly impacted: armour, thermal)
+						// However, research.json created and tested during this long period may be expecting this outcome / behavior
+						newUpgradesChange = (value < 0) ? iDivFloor(scaledChange, 100) : iDivCeil(scaledChange, 100);
+						newUpgradesValue = (currentUpgradesValue + newUpgradesChange);
+						break;
+					case ResearchUpgradeCalculationMode::Improved:
+					{
+						// "Improved" cumulative upgrade handling (significantly reduces accumulated errors)
+						auto& compUpgradeTotals = playerRawUpgradeChangeTotals[cname.first];
+						auto& cumulativeUpgradeScaledChange = compUpgradeTotals[parameter];
+						cumulativeUpgradeScaledChange += scaledChange;
+						newUpgradesValue = statsOriginalValue + ((cumulativeUpgradeScaledChange < 0) ? iDivFloor(cumulativeUpgradeScaledChange, 100) : iDivCeil(cumulativeUpgradeScaledChange, 100));
+						newUpgradesChange = newUpgradesValue - currentUpgradesValue;
+						break;
+					}
+				}
 				if (currentUpgradesValue_json.is_number_unsigned())
 				{
 					// original was unsigned integer - round anything less than 0 up to 0
@@ -910,6 +1034,37 @@ static void eventResearchedHandleUpgrades(const RESEARCH *psResearch, const STRU
 	}
 }
 
+static void makeComponentRedundant(UBYTE &state)
+{
+	switch (state)
+	{
+	case AVAILABLE:
+		state = REDUNDANT;
+		break;
+	case UNAVAILABLE:
+		state = REDUNDANT_UNAVAILABLE;
+		break;
+	case FOUND:
+		state = REDUNDANT_FOUND;
+		break;
+	}
+}
+
+static void makeComponentAvailable(UBYTE &state)
+{
+	switch (state)
+	{
+	case UNAVAILABLE:
+	case FOUND:
+		state = AVAILABLE;
+		break;
+	case REDUNDANT_UNAVAILABLE:
+	case REDUNDANT_FOUND:
+		state = REDUNDANT;
+		break;
+	}
+}
+
 /* process the results of a completed research topic */
 void researchResult(UDWORD researchIndex, UBYTE player, bool bDisplay, STRUCTURE *psResearchFacility, bool bTrigger)
 {
@@ -928,16 +1083,13 @@ void researchResult(UDWORD researchIndex, UBYTE player, bool bDisplay, STRUCTURE
 	//check for structures to be made available
 	for (unsigned short pStructureResult : pResearch->pStructureResults)
 	{
-		if (apStructTypeLists[player][pStructureResult] != REDUNDANT)
-		{
-			apStructTypeLists[player][pStructureResult] = AVAILABLE;
-		}
+		makeComponentAvailable(apStructTypeLists[player][pStructureResult]);
 	}
 
 	//check for structures to be made redundant
 	for (unsigned short pRedStruct : pResearch->pRedStructs)
 	{
-		apStructTypeLists[player][pRedStruct] = REDUNDANT;
+		makeComponentRedundant(apStructTypeLists[player][pRedStruct]);
 	}
 
 	//check for component replacement
@@ -947,7 +1099,7 @@ void researchResult(UDWORD researchIndex, UBYTE player, bool bDisplay, STRUCTURE
 		{
 			COMPONENT_STATS *pOldComp = ri.pOldComponent;
 			replaceComponent(ri.pNewComponent, pOldComp, player);
-			apCompLists[player][pOldComp->compType][pOldComp->index] = REDUNDANT;
+			makeComponentRedundant(apCompLists[player][pOldComp->compType][pOldComp->index]);
 		}
 	}
 
@@ -958,22 +1110,19 @@ void researchResult(UDWORD researchIndex, UBYTE player, bool bDisplay, STRUCTURE
 		COMPONENT_TYPE type = componentResult->compType;
 		//set the component state to AVAILABLE
 		int compInc = componentResult->index;
-		if (apCompLists[player][type][compInc] != REDUNDANT)
-		{
-			apCompLists[player][type][compInc] = AVAILABLE;
-		}
+		makeComponentAvailable(apCompLists[player][type][compInc]);
 		//check for default sensor
-		if (type == COMP_SENSOR && (asSensorStats + compInc)->location == LOC_DEFAULT)
+		if (type == COMP_SENSOR && asSensorStats[compInc].location == LOC_DEFAULT)
 		{
 			aDefaultSensor[player] = compInc;
 		}
 		//check for default ECM
-		else if (type == COMP_ECM && (asECMStats + compInc)->location == LOC_DEFAULT)
+		else if (type == COMP_ECM && asECMStats[compInc].location == LOC_DEFAULT)
 		{
 			aDefaultECM[player] = compInc;
 		}
 		//check for default Repair
-		else if (type == COMP_REPAIRUNIT && (asRepairStats + compInc)->location == LOC_DEFAULT)
+		else if (type == COMP_REPAIRUNIT && asRepairStats[compInc].location == LOC_DEFAULT)
 		{
 			aDefaultRepair[player] = compInc;
 			enableSelfRepair(player);
@@ -984,7 +1133,7 @@ void researchResult(UDWORD researchIndex, UBYTE player, bool bDisplay, STRUCTURE
 	for (auto &pRedArtefact : pResearch->pRedArtefacts)
 	{
 		COMPONENT_TYPE type = pRedArtefact->compType;
-		apCompLists[player][type][pRedArtefact->index] = REDUNDANT;
+		makeComponentRedundant(apCompLists[player][type][pRedArtefact->index]);
 	}
 
 	//Add message to player's list if Major Topic
@@ -1015,7 +1164,7 @@ void researchResult(UDWORD researchIndex, UBYTE player, bool bDisplay, STRUCTURE
 	if (player == selectedPlayer && bDisplay)
 	{
 		//add console text message
-		snprintf(consoleMsg, MAX_RESEARCH_MSG_SIZE, _("Research completed: %s"), _(getStatsName(pResearch)));
+		snprintf(consoleMsg, MAX_RESEARCH_MSG_SIZE, _("Research completed: %s"), getLocalizedStatsName(pResearch));
 		addConsoleMessage(consoleMsg, LEFT_JUSTIFY, SYSTEM_MESSAGE);
 	}
 
@@ -1040,12 +1189,17 @@ bool ResearchShutDown()
 void ResearchRelease()
 {
 	asResearch.clear();
+	researchUpgradeCalcMode = nullopt;
 	for (auto &i : asPlayerResList)
 	{
 		i.clear();
 	}
 	cachedStatsObject = nlohmann::json(nullptr);
 	cachedPerPlayerUpgrades.clear();
+	for (auto &p : cachedPerPlayerRawUpgradeChange)
+	{
+		p.clear();
+	}
 	playerUpgradeCounts = std::vector<PlayerUpgradeCounts>(MAX_PLAYERS);
 }
 
@@ -1106,10 +1260,9 @@ void releaseResearch(STRUCTURE *psBuilding, QUEUE_MODE mode)
 */
 void CancelAllResearch(UDWORD pl)
 {
-	STRUCTURE	*psCurr;
 	if (pl >= MAX_PLAYERS) { return; }
 
-	for (psCurr = apsStructLists[pl]; psCurr != nullptr; psCurr = psCurr->psNext)
+	for (STRUCTURE* psCurr : apsStructLists[pl])
 	{
 		if (psCurr->pStructureType->type == REF_RESEARCH)
 		{
@@ -1431,11 +1584,8 @@ static void replaceComponent(COMPONENT_STATS *pNewComponent, COMPONENT_STATS *pO
 	//check thru the templates
 	enumerateTemplates(player, replaceComponentInTemplate);
 	// also check build queues
-	STRUCTURE *psNBuilding = nullptr;
-	for (STRUCTURE *psCBuilding = apsStructLists[player]; psCBuilding != nullptr; psCBuilding = psNBuilding)
+	for (STRUCTURE *psCBuilding : apsStructLists[player])
 	{
-		/* Copy the next pointer - not 100% sure if the structure could get destroyed but this covers us anyway */
-		psNBuilding = psCBuilding->psNext;
 		if ((psCBuilding->pStructureType->type == STRUCTURE_TYPE::REF_FACTORY ||
 			psCBuilding->pStructureType->type == STRUCTURE_TYPE::REF_CYBORG_FACTORY ||
 			psCBuilding->pStructureType->type == STRUCTURE_TYPE::REF_VTOL_FACTORY) &&
@@ -1498,7 +1648,7 @@ void researchReward(UBYTE losingPlayer, UBYTE rewardPlayer)
 	UDWORD topicIndex = 0, researchPoints = 0, rewardID = 0;
 
 	//look through the losing players structures to find a research facility
-	for (STRUCTURE *psStruct = apsStructLists[losingPlayer]; psStruct != nullptr; psStruct = psStruct->psNext)
+	for (const STRUCTURE *psStruct : apsStructLists[losingPlayer])
 	{
 		if (psStruct->pStructureType->type == REF_RESEARCH)
 		{
@@ -1506,7 +1656,7 @@ void researchReward(UBYTE losingPlayer, UBYTE rewardPlayer)
 			if (psFacility->psBestTopic)
 			{
 				topicIndex = ((RESEARCH *)psFacility->psBestTopic)->ref - STAT_RESEARCH;
-				if (topicIndex)
+				if (topicIndex && !IsResearchCompleted(&asPlayerResList[rewardPlayer][topicIndex]))
 				{
 					//if it cost more - it is better (or should be)
 					if (researchPoints < asResearch[topicIndex].researchPoints)
@@ -1529,7 +1679,7 @@ void researchReward(UBYTE losingPlayer, UBYTE rewardPlayer)
 			//name the actual reward
 			CONPRINTF("%s :- %s",
 			                          _("Research Award"),
-			                          getStatsName(&asResearch[rewardID]));
+			                          getLocalizedStatsName(&asResearch[rewardID]));
 		}
 	}
 }
@@ -1556,17 +1706,15 @@ bool selfRepairEnabled(UBYTE player)
 }
 
 /*for a given list of droids, replace the old component if exists*/
-void replaceDroidComponent(DROID *pList, UDWORD oldType, UDWORD oldCompInc,
+void replaceDroidComponent(DroidList& pList, UDWORD oldType, UDWORD oldCompInc,
                            UDWORD newCompInc)
 {
-	DROID   *psDroid;
-
 	//check thru the droids
-	for (psDroid = pList; psDroid != nullptr; psDroid = psDroid->psNext)
+	for (DROID* psDroid : pList)
 	{
 		switchComponent(psDroid, oldType, oldCompInc, newCompInc);
 		// Need to replace the units inside the transporter
-		if (isTransporter(psDroid))
+		if (psDroid->isTransporter())
 		{
 			replaceTransDroidComponents(psDroid, oldType, oldCompInc, newCompInc);
 		}
@@ -1577,12 +1725,9 @@ void replaceDroidComponent(DROID *pList, UDWORD oldType, UDWORD oldCompInc,
 void replaceTransDroidComponents(DROID *psTransporter, UDWORD oldType,
                                  UDWORD oldCompInc, UDWORD newCompInc)
 {
-	DROID       *psCurr;
+	ASSERT(psTransporter->isTransporter(), "invalid unit type");
 
-	ASSERT(isTransporter(psTransporter), "invalid unit type");
-
-	for (psCurr = psTransporter->psGroup->psList; psCurr != nullptr; psCurr =
-	         psCurr->psGrpNext)
+	for (DROID* psCurr : psTransporter->psGroup->psList)
 	{
 		if (psCurr != psTransporter)
 		{
@@ -1591,10 +1736,9 @@ void replaceTransDroidComponents(DROID *psTransporter, UDWORD oldType,
 	}
 }
 
-void replaceStructureComponent(STRUCTURE *pList, UDWORD oldType, UDWORD oldCompInc,
+void replaceStructureComponent(StructureList& pList, UDWORD oldType, UDWORD oldCompInc,
                                UDWORD newCompInc, UBYTE player)
 {
-	STRUCTURE   *psStructure;
 	int			inc;
 
 	// If the type is not one we are interested in, then don't bother checking
@@ -1604,7 +1748,7 @@ void replaceStructureComponent(STRUCTURE *pList, UDWORD oldType, UDWORD oldCompI
 	}
 
 	//check thru the structures
-	for (psStructure = pList; psStructure != nullptr; psStructure = psStructure->psNext)
+	for (STRUCTURE* psStructure : pList)
 	{
 		switch (oldType)
 		{
@@ -1710,7 +1854,7 @@ std::vector<AllyResearch> const &listAllyResearch(unsigned ref)
 			}
 
 			// Check each research facility to see if they are doing this topic. (As opposed to having started the topic, but stopped researching it.)
-			for (STRUCTURE *psStruct = apsStructLists[player]; psStruct != nullptr; psStruct = psStruct->psNext)
+			for (const STRUCTURE *psStruct : apsStructLists[player])
 			{
 				RESEARCH_FACILITY *res = (RESEARCH_FACILITY *)psStruct->pFunctionality;
 				if (psStruct->pStructureType->type != REF_RESEARCH || res->psSubject == nullptr)

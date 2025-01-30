@@ -21,10 +21,10 @@
 #include "urlrequest.h"
 #include <mutex>
 #include <memory>
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 using nonstd::optional;
 using nonstd::nullopt;
-#include <3rdparty/json/json.hpp>
+#include <nlohmann/json.hpp>
 using json = nlohmann::json;
 
 static std::string publicIPv4LookupService = WZ_DEFAULT_PUBLIC_IPv4_LOOKUP_SERVICE_URL;
@@ -117,12 +117,12 @@ static void requestPublicIPAddress(const std::string& lookupServiceUrl, Internet
 		std::string ipAddressString = it.value().get<std::string>();
 		callback(ipAddressString, nullopt);
 	};
-	request.onFailure = [callback](const std::string& url, URLRequestFailureType type, optional<HTTPResponseDetails> transferDetails) {
+	request.onFailure = [callback](const std::string& url, URLRequestFailureType type, std::shared_ptr<HTTPResponseDetails> transferDetails) {
 		std::string errorString = "Request failed; failure type: ";
 		errorString += std::to_string(type);
-		if (transferDetails.has_value())
+		if (transferDetails)
 		{
-			errorString += "; status code: " + std::to_string(transferDetails.value().httpStatusCode());
+			errorString += "; status code: " + std::to_string(transferDetails->httpStatusCode());
 		}
 		callback(nullopt, errorString);
 	};

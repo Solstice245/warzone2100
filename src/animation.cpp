@@ -41,7 +41,7 @@ ValueTracker* ValueTracker::stopTracking()
 	this->_reachedTarget = false;
 	return this;
 }
-bool ValueTracker::isTracking()
+bool ValueTracker::isTracking() const
 {
 	return this->startTime != 0;
 }
@@ -77,10 +77,25 @@ ValueTracker* ValueTracker::update()
 		return this;
 	}
 
-	this->current = (this->initial + this->targetDelta - this->current) * realTimeAdjustedIncrement(this->speed) + this->current;
+	auto deltaRemaining = (this->initial + this->targetDelta - this->current);
+	auto adjustedChange = deltaRemaining * realTimeAdjustedIncrement(this->speed);
+
+	// prevent "over-shooting" / rubber-banding
+	if (deltaRemaining >= 0.f && adjustedChange > deltaRemaining)
+	{
+		adjustedChange = deltaRemaining;
+		this->_reachedTarget = true;
+	}
+	else if (deltaRemaining < 0.f && adjustedChange < deltaRemaining)
+	{
+		adjustedChange = deltaRemaining;
+		this->_reachedTarget = true;
+	}
+
+	this->current = adjustedChange + this->current;
 	return this;
 }
-int ValueTracker::getCurrent()
+int ValueTracker::getCurrent() const
 {
 	if(this->_reachedTarget)
 	{
@@ -88,7 +103,7 @@ int ValueTracker::getCurrent()
 	}
 	return static_cast<int>(this->current);
 }
-int ValueTracker::getCurrentDelta()
+int ValueTracker::getCurrentDelta() const
 {
 	if(this->_reachedTarget)
 	{
@@ -96,19 +111,19 @@ int ValueTracker::getCurrentDelta()
 	}
 	return static_cast<int>(this->current - this->initial);
 }
-int ValueTracker::getInitial()
+int ValueTracker::getInitial() const
 {
 	return this->initial;
 }
-int ValueTracker::getTarget()
+int ValueTracker::getTarget() const
 {
 	return this->target;
 }
-int ValueTracker::getTargetDelta()
+int ValueTracker::getTargetDelta() const
 {
 	return this->targetDelta;
 }
-bool ValueTracker::reachedTarget()
+bool ValueTracker::reachedTarget() const
 {
 	return this->_reachedTarget;
 }

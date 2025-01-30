@@ -53,13 +53,13 @@ static enum
 
 struct TipDisplayCache {
 	std::vector<WzText> wzTip;
+	std::vector<int> wzTipYStart;
 };
 
 static int32_t startTime;
 static Vector2i lastMouseCoords;
 static WzRect tipRect;
 static Vector2i textOffset;
-static int lineHeight;
 static std::string tipText;
 static WIDGET *tipSourceWidget;
 static PIELIGHT TipColour;
@@ -139,33 +139,45 @@ static void refreshTip(std::shared_ptr<WIDGET> mouseOverWidget)
 	if (auto lockedScreen = mouseOverWidget->screenPointer.lock()) {
 		fontId = lockedScreen->TipFontID;
 	}
-	lineHeight = iV_GetTextLineSize(fontId);
 
 	auto maxLineWidth = 0;
 	auto lines = splitString(tipText, '\n');
+	auto totalLineSize = 0;
 	displayCache.wzTip.resize(lines.size());
+	displayCache.wzTipYStart.resize(lines.size());
 	for (size_t n = 0; n < lines.size(); ++n)
 	{
-		displayCache.wzTip[n].setText(lines[n], fontId);
+		displayCache.wzTip[n].setText(WzString::fromUtf8(lines[n]), fontId);
 		maxLineWidth = std::max<int>(maxLineWidth, displayCache.wzTip[n].width());
+		displayCache.wzTipYStart[n] = totalLineSize;
+		totalLineSize += displayCache.wzTip[n].lineSize();
 	}
 
 	/* Position the tip box */
 	auto width = maxLineWidth + TIP_HGAP * 2;
-	auto height = TIP_VGAP * 2 + lineHeight * static_cast<int32_t>(lines.size()) + iV_GetTextBelowBase(fontId);
-	auto x = clip<SDWORD>(mouseOverWidget->screenPosX() + mouseOverWidget->width() / 2, 0, screenWidth - width - 1);
-	auto y = std::max(mouseOverWidget->screenPosY() + mouseOverWidget->height() + TIP_VGAP, 0);
-	if (y + height >= (int)screenHeight)
+	int32_t height = TIP_VGAP * 2 + totalLineSize;
+	if (!lines.empty())
 	{
-		/* Position the tip above the button */
-		y = mouseOverWidget->screenPosY() - height - TIP_VGAP;
+		height += displayCache.wzTip.back().belowBase();
+	}
+	auto x = clip<SDWORD>(mouseOverWidget->screenPosX() + mouseOverWidget->width() / 2, 0, screenWidth - width - 1);
+	auto y = std::min(mouseOverWidget->screenPosY() - height - TIP_VGAP, (int)screenHeight);
+	if (y < 0)
+	{
+		/* Position the tip below the button */
+		y = std::max(mouseOverWidget->screenPosY() + mouseOverWidget->height() + TIP_VGAP, 0);
 	}
 	tipRect = WzRect(x - 1, y - 1, width + 2, height + 2);
 
 	/* Position the text */
+	int yOffset = (height - totalLineSize) / 2;
+	if (!lines.empty())
+	{
+		yOffset -=  displayCache.wzTip.front().aboveBase();
+	}
 	textOffset = Vector2i(
 		x + TIP_HGAP,
-		y + (height - lineHeight * static_cast<int32_t>(lines.size())) / 2 - iV_GetTextAboveBase(fontId)
+		y + yOffset
 	);
 }
 
@@ -209,7 +221,7 @@ static void handleTipActive()
 	size_t n = 0;
 	for (auto &line: displayCache.wzTip)
 	{
-		line.render(textOffset.x, textOffset.y + lineHeight * static_cast<int32_t>(n), TipColour);
+		line.render(textOffset.x, textOffset.y + displayCache.wzTipYStart[n], TipColour);
 		++n;
 	}
 }

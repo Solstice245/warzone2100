@@ -44,6 +44,7 @@
 #include "piepalette.h"
 #include "pieclip.h"
 #include <list>
+#include <map>
 
 /***************************************************************************/
 /*
@@ -84,14 +85,17 @@ public:
 	GFX& operator=( const GFX& ) = delete; // non copyable
 
 	/// Load texture data from file, allocate space for it, and put it on the GPU
-	void loadTexture(const char *filename, int maxWidth = -1, int maxHeight = -1);
+	void loadTexture(const char *filename, gfx_api::texture_type textureType, int maxWidth = -1, int maxHeight = -1);
+
+	void loadTexture(iV_Image&& bitmap, gfx_api::texture_type textureType, const std::string& filename, int maxWidth = -1, int maxHeight = -1);
 
 	/// Allocate space on the GPU for texture of given parameters. If image is non-NULL,
 	/// then that memory buffer is uploaded to the GPU.
-	void makeTexture(size_t width, size_t height, const gfx_api::pixel_format& format = gfx_api::pixel_format::FORMAT_RGBA8_UNORM_PACK8, const void *image = nullptr);
+	void makeTexture(size_t width, size_t height, const gfx_api::pixel_format& format = gfx_api::pixel_format::FORMAT_RGBA8_UNORM_PACK8, const std::string& debugName = "");
+	void makeCompatibleTexture(const iV_Image* image /*= nullptr*/, const std::string& filename);
 
 	/// Upload given memory buffer to already allocated texture space on the GPU
-	void updateTexture(const void *image, size_t width = 0, size_t height = 0);
+	void updateTexture(const iV_Image& image /*= nullptr*/);
 
 	/// Upload vertex and texture buffer data to the GPU
 	void buffers(int vertices, const void *vertBuf, const void *texBuf);
@@ -118,9 +122,6 @@ public:
 
 private:
 	GFXTYPE mType;
-	gfx_api::pixel_format mFormat;
-	size_t mWidth = 0;
-	size_t mHeight = 0;
 	int mCoordsPerVertex;
 	gfx_api::buffer* mBuffers[VBO_COUNT] = { nullptr };
 	gfx_api::texture* mTexture = nullptr;
@@ -160,7 +161,62 @@ struct PIERECT_DrawRequest
 	int y1;
 	PIELIGHT color;
 };
+struct PIERECT_DrawRequest_f
+{
+	PIERECT_DrawRequest_f(float x0, float y0, float x1, float y1, PIELIGHT color)
+	: x0(x0)
+	, y0(y0)
+	, x1(x1)
+	, y1(y1)
+	, color(color)
+	{ }
+
+	float x0;
+	float y0;
+	float x1;
+	float y1;
+	PIELIGHT color;
+};
 void pie_DrawMultiRect(std::vector<PIERECT_DrawRequest> rects);
+class BatchedMultiRectRenderer
+{
+public:
+	void resizeRectGroups(size_t count);
+	void addRect(PIERECT_DrawRequest rectRequest, size_t rectGroup = 0);
+	void addRectF(PIERECT_DrawRequest_f rectRequest, size_t rectGroup = 0);
+	void drawAllRects(glm::mat4 projectionMatrix = defaultProjectionMatrix());
+	void drawRects(optional<size_t> rectGroup, glm::mat4 projectionMatrix = defaultProjectionMatrix());
+public:
+	bool initialize();
+	void clear();
+	void reset();
+private:
+	struct UploadedRectsInstanceBufferInfo
+	{
+		gfx_api::buffer* buffer = nullptr;
+		size_t totalInstances = 0;
+		struct GroupBufferInfo
+		{
+			size_t bufferOffset = 0;
+			size_t instancesCount = 0;
+
+			GroupBufferInfo(size_t bufferOffset, size_t instancesCount)
+			: bufferOffset(bufferOffset), instancesCount(instancesCount)
+			{ }
+		};
+		std::vector<GroupBufferInfo> groupInfo;
+	};
+	UploadedRectsInstanceBufferInfo uploadAllRectInstances();
+private:
+	bool useInstancedRendering = false;
+	std::vector<std::vector<gfx_api::MultiRectPerInstanceInterleavedData>> groupsData;
+	size_t totalAddedRects = 0;
+
+	std::vector<gfx_api::MultiRectPerInstanceInterleavedData> instancesData;
+	std::vector<gfx_api::buffer*> instanceDataBuffers;
+	size_t currInstanceBufferIdx = 0;
+	optional<UploadedRectsInstanceBufferInfo> currentUploadedRectInfo;
+};
 struct PIERECT  ///< Screen rectangle.
 {
 	float x, y, w, h;
@@ -220,28 +276,32 @@ void iV_DrawImageAnisotropic(gfx_api::texture& TextureID, Vector2i Position, Vec
 void iV_DrawImageText(gfx_api::texture& TextureID, Vector2f Position, Vector2f offset, Vector2f size, float angle, PIELIGHT colour);
 void iV_DrawImageTextClipped(gfx_api::texture& TextureID, Vector2i textureSize, Vector2f Position, Vector2f offset, Vector2f size, float angle, PIELIGHT colour, WzRect clippingRect);
 void iV_DrawImage(IMAGEFILE *ImageFile, UWORD ID, int x, int y, const glm::mat4 &modelViewProjection = defaultProjectionMatrix(), BatchedImageDrawRequests* pBatchedRequests = nullptr, uint8_t alpha = 255);
+void iV_DrawImageTint(IMAGEFILE *ImageFile, UWORD ID, float x, float y, PIELIGHT color, optional<Vector2f> size = nullopt, const glm::mat4 &modelViewProjection = defaultProjectionMatrix(), BatchedImageDrawRequests* pBatchedRequests = nullptr);
 void iV_DrawImageFileAnisotropic(IMAGEFILE *ImageFile, UWORD ID, int x, int y, Vector2f size, const glm::mat4 &modelViewProjection = defaultProjectionMatrix(), uint8_t alpha = 255);
+void iV_DrawImageFileAnisotropicTint(IMAGEFILE *ImageFile, UWORD ID, int x, int y, Vector2f size, PIELIGHT color, const glm::mat4 &modelViewProjection = defaultProjectionMatrix());
 void iV_DrawImage2(const WzString &filename, float x, float y, float width = -0.0f, float height = -0.0f);
-void iV_DrawImage2(const ImageDef *image, float x, float y, float width = -0.0f, float height = -0.0f);
-void iV_DrawImageTc(Image image, Image imageTc, int x, int y, PIELIGHT colour, const glm::mat4 &modelViewProjection = defaultProjectionMatrix());
+void iV_DrawImage2(const AtlasImageDef *image, float x, float y, float width = -0.0f, float height = -0.0f);
+void iV_DrawImageTc(AtlasImage image, AtlasImage imageTc, int x, int y, PIELIGHT colour, const glm::mat4 &modelViewProjection = defaultProjectionMatrix());
 void iV_DrawImageRepeatX(IMAGEFILE *ImageFile, UWORD ID, int x, int y, int Width, const glm::mat4 &modelViewProjection = defaultProjectionMatrix(), bool enableHorizontalTilingSeamWorkaround = false, BatchedImageDrawRequests* pBatchedRequests = nullptr);
 void iV_DrawImageRepeatY(IMAGEFILE *ImageFile, UWORD ID, int x, int y, int Height, const glm::mat4 &modelViewProjection = defaultProjectionMatrix(), BatchedImageDrawRequests* pBatchedRequests = nullptr);
 
-static inline void iV_DrawImageImage(Image image, int x, int y, uint8_t alpha = 255)
+static inline void iV_DrawImageImage(AtlasImage image, int x, int y, uint8_t alpha = 255)
 {
 	iV_DrawImage(image.images, image.id, x, y, defaultProjectionMatrix(), nullptr, alpha);
 }
 static inline void iV_DrawImageTc(IMAGEFILE *imageFile, unsigned id, unsigned idTc, int x, int y, PIELIGHT colour)
 {
-	iV_DrawImageTc(Image(imageFile, id), Image(imageFile, idTc), x, y, colour);
+	iV_DrawImageTc(AtlasImage(imageFile, id), AtlasImage(imageFile, idTc), x, y, colour);
 }
 
 void iV_TransBoxFill(float x0, float y0, float x1, float y1);
 void pie_UniTransBoxFill(float x0, float y0, float x1, float y1, PIELIGHT colour);
 
+bool assertValidImage(IMAGEFILE *imageFile, unsigned id);
+
 bool pie_InitRadar();
 bool pie_ShutdownRadar();
-void pie_DownLoadRadar(UDWORD *buffer);
+void pie_DownLoadRadar(const iV_Image& bitmap);
 void pie_RenderRadar(const glm::mat4 &modelViewProjectionMatrix);
 void pie_SetRadar(gfx_api::gfxFloat x, gfx_api::gfxFloat y, gfx_api::gfxFloat width, gfx_api::gfxFloat height, size_t twidth, size_t theight);
 
@@ -252,5 +312,9 @@ enum SCREENTYPE
 };
 
 void pie_LoadBackDrop(SCREENTYPE screenType);
+
+// Debug: Draw a texture to a screen quad, given a position, offset, size (in screen coordinates), angle, and colour
+// Optionally takes a channelSwizzle - glm::ivec4(0,0,0,3) for example, to just use the red channel (preserving the last channel)
+void iV_DebugDrawTextureToQuad(gfx_api::abstract_texture& texture, size_t layer, Vector2f Position, Vector2f offset, Vector2f size, float angle, PIELIGHT colour, glm::ivec4 channelSwizzle = glm::ivec4(0,1,2,3), glm::mat4 textureUVTransform = glm::mat4(1.f));
 
 #endif //

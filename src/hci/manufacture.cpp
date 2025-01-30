@@ -1,3 +1,22 @@
+/*
+	This file is part of Warzone 2100.
+	Copyright (C) 2021-2023  Warzone 2100 Project
+
+	Warzone 2100 is free software; you can redistribute it and/or modify
+	it under the terms of the GNU General Public License as published by
+	the Free Software Foundation; either version 2 of the License, or
+	(at your option) any later version.
+
+	Warzone 2100 is distributed in the hope that it will be useful,
+	but WITHOUT ANY WARRANTY; without even the implied warranty of
+	MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+	GNU General Public License for more details.
+
+	You should have received a copy of the GNU General Public License
+	along with Warzone 2100; if not, write to the Free Software
+	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
+*/
+
 #include "lib/widget/button.h"
 #include "lib/widget/label.h"
 #include "lib/widget/bar.h"
@@ -6,12 +25,15 @@
 #include "manufacture.h"
 #include "../mission.h"
 #include "../qtscript.h"
+#include "../display3d.h"
 
 STRUCTURE *ManufactureController::highlightedFactory = nullptr;
+static const uint8_t nullBrainComponent = 0; // "0" to reference "NULLxxx" components
+static const uint8_t commandBrainComponent = 1; // hmm there is only 1 "CommandBrain01" anyway..
 
 FACTORY *getFactoryOrNullptr(STRUCTURE *factory)
 {
-	ASSERT_OR_RETURN(nullptr, StructIsFactory(factory), "Invalid factory pointer");
+	ASSERT_OR_RETURN(nullptr, factory && factory->isFactory(), "Invalid factory pointer");
 	return (FACTORY *)factory->pFunctionality;
 }
 
@@ -116,11 +138,15 @@ void ManufactureController::updateFactoriesList()
 {
 	factories.clear();
 
-	for (auto structure = interfaceStructList(); structure != nullptr; structure = structure->psNext)
+	auto* intStrList = interfaceStructList();
+	if (intStrList)
 	{
-		if (structure->status == SS_BUILT && structure->died == 0 && StructIsFactory(structure))
+		for (auto structure : *intStrList)
 		{
-			factories.push_back(structure);
+			if (structure->status == SS_BUILT && structure->died == 0 && structure->isFactory())
+			{
+				factories.push_back(structure);
+			}
 		}
 	}
 
@@ -158,11 +184,11 @@ void ManufactureController::refresh()
 void ManufactureController::clearData()
 {
 	factories.clear();
-	setHighlightedObject(nullptr);
+	setHighlightedObject(nullptr, false);
 	stats.clear();
 }
 
-void ManufactureController::setHighlightedObject(BASE_OBJECT *object)
+void ManufactureController::setHighlightedObject(BASE_OBJECT *object, bool jumpToHighlightedStatsObject)
 {
 	if (object == nullptr)
 	{
@@ -171,7 +197,8 @@ void ManufactureController::setHighlightedObject(BASE_OBJECT *object)
 	}
 
 	auto factory = castStructure(object);
-	ASSERT_OR_RETURN(, StructIsFactory(factory), "Invalid factory pointer");
+	ASSERT_OR_RETURN(, factory && factory->isFactory(), "Invalid factory pointer");
+	queuedJumpToHighlightedStatsObject = queuedJumpToHighlightedStatsObject || jumpToHighlightedStatsObject;
 	highlightedFactory = factory;
 }
 
@@ -205,7 +232,7 @@ public:
 	void clickPrimary() override
 	{
 		controller->clearStructureSelection();
-		controller->selectObject(controller->getObjectAt(objectIndex));
+		controller->selectObject(controller->getObjectAt(objectIndex), false);
 		jump();
 		BaseStatsController::scheduleDisplayStatsForm(controller);
 	}
@@ -214,7 +241,10 @@ protected:
 	void initialize()
 	{
 		attach(factoryNumberLabel = std::make_shared<W_LABEL>());
+		attach(factoryAssignGroupLabel = std::make_shared<W_LABEL>());
 		factoryNumberLabel->setGeometry(OBJ_TEXTX, OBJ_B1TEXTY, 16, 16);
+		factoryAssignGroupLabel->setGeometry(OBJ_TEXTX + 48, OBJ_B1TEXTY, 16, 16);
+		factoryAssignGroupLabel->setFontColour(pal_RGBA(255, 220, 115, 255) /* gold */);
 	}
 
 	void display(int xOffset, int yOffset) override
@@ -229,28 +259,39 @@ protected:
 			intRefreshScreen();
 			return;
 		}
-		displayIMD(Image(), ImdObject::Structure(factory), xOffset, yOffset);
+		displayIMD(AtlasImage(), ImdObject::Structure(factory), xOffset, yOffset);
 		displayIfHighlight(xOffset, yOffset);
 	}
 
 	void updateLayout() override
 	{
 		BaseWidget::updateLayout();
-		auto factory = getFactoryOrNullptr(controller->getObjectAt(objectIndex));
+		auto psStruct = controller->getObjectAt(objectIndex);
+		auto factory = getFactoryOrNullptr(psStruct);
 		ASSERT_NOT_NULLPTR_OR_RETURN(, factory);
 		if (factory->psAssemblyPoint == nullptr)
 		{
 			factoryNumberLabel->setString("");
-			return;
 		}
-		factoryNumberLabel->setString(WzString::fromUtf8(astringf("%u", factory->psAssemblyPoint->factoryInc + 1)));
+		else
+		{
+			factoryNumberLabel->setString(WzString::fromUtf8(astringf("%u", factory->psAssemblyPoint->factoryInc + 1)));
+		}
+		if (psStruct->productToGroup != UBYTE_MAX)
+		{
+			factoryAssignGroupLabel->setString(WzString::fromUtf8(astringf("%u", psStruct->productToGroup)));
+		}
+		else
+		{
+			factoryAssignGroupLabel->setString("");
+		}
 	}
 
 	std::string getTip() override
 	{
 		auto factory = controller->getObjectAt(objectIndex);
 		ASSERT_NOT_NULLPTR_OR_RETURN("", factory);
-		return getStatsName(factory->pStructureType);
+		return getLocalizedStatsName(factory->pStructureType);
 	}
 
 	ManufactureController &getController() const override
@@ -261,6 +302,7 @@ protected:
 private:
 	std::shared_ptr<ManufactureController> controller;
 	std::shared_ptr<W_LABEL> factoryNumberLabel;
+	std::shared_ptr<W_LABEL> factoryAssignGroupLabel;
 };
 
 class ManufactureStatsButton: public StatsButton
@@ -291,8 +333,7 @@ protected:
 		auto production = getStats();
 		auto productionPending = factory && StructureIsManufacturingPending(factory);
 		auto objectImage = productionPending && production ? ImdObject::DroidTemplate(production): ImdObject::Component(nullptr);
-
-		displayIMD(Image(), objectImage, xOffset, yOffset);
+		displayIMD(AtlasImage(), objectImage, xOffset, yOffset);
 
 		if (productionPending && StructureIsOnHoldPending(factory))
 		{
@@ -301,6 +342,49 @@ protected:
 		else
 		{
 			displayIfHighlight(xOffset, yOffset);
+		}
+		drawNextDroidRank(xOffset, yOffset);
+	}
+
+	// show a little icon on the bottom, indicating what rank next unit will be
+	// remember that when it's a commander, same rank will require twice experience
+	void drawNextDroidRank(int xOffset, int yOffset)
+	{
+		const auto factory = controller->getObjectAt(objectIndex);
+		if (!factory)
+		{
+			return;
+		}
+		const auto player = factory->player;
+		const auto exp = getTopExperience(player);
+		unsigned int lvl = 0;
+		if (!factory->pFunctionality->factory.psSubject)
+		{
+			// not showing icon when nothing is being built
+			return;
+		}
+		if (factory->pFunctionality->factory.psSubject->droidType == DROID_COMMAND || factory->pFunctionality->factory.psSubject->droidType == DROID_SENSOR)
+		{
+			lvl = getDroidLevel(exp, player, commandBrainComponent);
+		}
+		else if (factory->pFunctionality->factory.psSubject->droidType == DROID_CONSTRUCT
+		|| factory->pFunctionality->factory.psSubject->droidType == DROID_CYBORG_CONSTRUCT
+		|| factory->pFunctionality->factory.psSubject->droidType == DROID_CYBORG_REPAIR
+		|| factory->pFunctionality->factory.psSubject->droidType == DROID_REPAIR
+		|| factory->pFunctionality->factory.psSubject->droidType == DROID_TRANSPORTER
+		|| factory->pFunctionality->factory.psSubject->droidType == DROID_SUPERTRANSPORTER)
+		{
+			lvl = 0;
+		}
+		else
+		{
+			lvl = getDroidLevel(exp, player, nullBrainComponent);
+		}
+		const auto expgfx = getDroidRankGraphicFromLevel(lvl);
+		if (expgfx != UDWORD_MAX)
+		{
+			// FIXME: use offsets relative to template positon, not hardcoded values ?
+			iV_DrawImage(IntImages, (UWORD)expgfx, xOffset + 45, yOffset + 4);
 		}
 	}
 
@@ -387,17 +471,17 @@ private:
 		ASSERT_NOT_NULLPTR_OR_RETURN(, factory);
 		controller->releaseFactoryProduction(factory);
 		controller->clearStructureSelection();
-		controller->selectObject(factory);
+		controller->selectObject(factory, true);
 		BaseStatsController::scheduleDisplayStatsForm(controller);
 	}
 
-	void clickSecondary() override
+	void clickSecondary(bool synthesizedFromHold) override
 	{
 		auto factory = controller->getObjectAt(objectIndex);
 		ASSERT_NOT_NULLPTR_OR_RETURN(, factory);
 		controller->clearStructureSelection();
 		controller->cancelFactoryProduction(factory);
-		controller->setHighlightedObject(factory);
+		controller->setHighlightedObject(factory, true);
 		controller->refresh();
 		BaseStatsController::scheduleDisplayStatsForm(controller);
 	}
@@ -431,7 +515,7 @@ protected:
 		auto stat = getStats();
 		ASSERT_NOT_NULLPTR_OR_RETURN(, stat);
 
-		displayIMD(Image(), ImdObject::DroidTemplate(stat), xOffset, yOffset);
+		displayIMD(AtlasImage(), ImdObject::DroidTemplate(stat), xOffset, yOffset);
 		displayIfHighlight(xOffset, yOffset);
 	}
 
@@ -495,7 +579,7 @@ private:
 		adjustFactoryProduction(true);
 	}
 
-	void clickSecondary() override
+	void clickSecondary(bool synthesizedFromHold) override
 	{
 		adjustFactoryProduction(false);
 	}
@@ -594,11 +678,11 @@ private:
 		attach(obsoleteButton);
 		obsoleteButton->style |= WBUT_SECONDARY;
 		obsoleteButton->setChoice(controller->shouldShowRedundantDesign());
-		obsoleteButton->setImages(false, MultipleChoiceButton::Images(Image(IntImages, IMAGE_OBSOLETE_HIDE_UP), Image(IntImages, IMAGE_OBSOLETE_HIDE_UP), Image(IntImages, IMAGE_OBSOLETE_HIDE_HI)));
+		obsoleteButton->setImages(false, MultipleChoiceButton::Images(AtlasImage(IntImages, IMAGE_OBSOLETE_HIDE_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_HIDE_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_HIDE_HI)));
 		obsoleteButton->setTip(false, _("Hiding Obsolete Tech"));
-		obsoleteButton->setImages(true,  MultipleChoiceButton::Images(Image(IntImages, IMAGE_OBSOLETE_SHOW_UP), Image(IntImages, IMAGE_OBSOLETE_SHOW_UP), Image(IntImages, IMAGE_OBSOLETE_SHOW_HI)));
+		obsoleteButton->setImages(true,  MultipleChoiceButton::Images(AtlasImage(IntImages, IMAGE_OBSOLETE_SHOW_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_SHOW_UP), AtlasImage(IntImages, IMAGE_OBSOLETE_SHOW_HI)));
 		obsoleteButton->setTip(true, _("Showing Obsolete Tech"));
-		obsoleteButton->move(4 + Image(IntImages, IMAGE_FDP_UP).width() + 4, STAT_SLDY);
+		obsoleteButton->move(4 + AtlasImage(IntImages, IMAGE_FDP_UP).width() + 4, STAT_SLDY);
 
 		auto weakController = std::weak_ptr<ManufactureController>(controller);
 		obsoleteButton->addOnClickHandler([weakController](W_BUTTON &button) {
@@ -662,13 +746,13 @@ private:
 			{
 			default:
 			case REF_FACTORY:
-				setImages(Image(IntImages, IMAGE_FDP_UP), Image(IntImages, IMAGE_FDP_DOWN), Image(IntImages, IMAGE_FDP_HI));
+				setImages(AtlasImage(IntImages, IMAGE_FDP_UP), AtlasImage(IntImages, IMAGE_FDP_DOWN), AtlasImage(IntImages, IMAGE_FDP_HI));
 				break;
 			case REF_CYBORG_FACTORY:
-				setImages(Image(IntImages, IMAGE_CDP_UP), Image(IntImages, IMAGE_CDP_DOWN), Image(IntImages, IMAGE_CDP_HI));
+				setImages(AtlasImage(IntImages, IMAGE_CDP_UP), AtlasImage(IntImages, IMAGE_CDP_DOWN), AtlasImage(IntImages, IMAGE_CDP_HI));
 				break;
 			case REF_VTOL_FACTORY:
-				setImages(Image(IntImages, IMAGE_VDP_UP), Image(IntImages, IMAGE_VDP_DOWN), Image(IntImages, IMAGE_VDP_HI));
+				setImages(AtlasImage(IntImages, IMAGE_VDP_UP), AtlasImage(IntImages, IMAGE_VDP_DOWN), AtlasImage(IntImages, IMAGE_VDP_HI));
 				break;
 			}
 		}
@@ -685,7 +769,7 @@ private:
 		LoopProductionButton(const std::shared_ptr<ManufactureController> &controller): BaseWidget(), controller(controller)
 		{
 			style |= WBUT_SECONDARY;
-			setImages(Image(IntImages, IMAGE_LOOP_UP), Image(IntImages, IMAGE_LOOP_DOWN), Image(IntImages, IMAGE_LOOP_HI));
+			setImages(AtlasImage(IntImages, IMAGE_LOOP_UP), AtlasImage(IntImages, IMAGE_LOOP_DOWN), AtlasImage(IntImages, IMAGE_LOOP_HI));
 			setTip(_("Loop Production"));
 		}
 

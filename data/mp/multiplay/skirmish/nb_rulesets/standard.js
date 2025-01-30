@@ -125,11 +125,11 @@ const classResearch = {
 		],
 		[ // OBJTYPE.DEFS
 			"R-Defense-WallUpgrade03",
-			"R-Struc-Materials03",
+			"R-Struc-Materials01",
 			"R-Defense-WallUpgrade06",
-			"R-Struc-Materials06",
+			"R-Struc-Materials02",
 			"R-Defense-WallUpgrade12",
-			"R-Struc-Materials09",
+			"R-Struc-Materials03",
 		],
 		[ // OBJTYPE.VTOL
 			"R-Vehicle-Metals09",
@@ -144,11 +144,11 @@ const classResearch = {
 		],
 		[
 			"R-Defense-WallUpgrade03",
-			"R-Struc-Materials03",
+			"R-Struc-Materials01",
 			"R-Defense-WallUpgrade06",
-			"R-Struc-Materials06",
+			"R-Struc-Materials02",
 			"R-Defense-WallUpgrade12",
-			"R-Struc-Materials09",
+			"R-Struc-Materials03",
 		],
 		[
 			"R-Vehicle-Armor-Heat09",
@@ -224,7 +224,7 @@ const weaponStats = {
 		],
 		// Extra things to research on this path, even if they don't lead to any new stuff
 		extras: [
-			"R-Wpn-MG-Damage08",
+			"R-Wpn-MG-Damage10",
 		],
 	},
 	flamers: {
@@ -430,6 +430,7 @@ const weaponStats = {
 		micro: MICRO.DUMB,
 		weapons: [
 			{ res: "R-Wpn-Rocket02-MRL", stat: "Rocket-MRL", weight: WEIGHT.LIGHT }, // mra
+			{ res: "R-Wpn-Rocket02-MRLHvy", stat: "Rocket-MRL-Hvy", weight: WEIGHT.LIGHT }, // hra
 			{ res: "R-Wpn-Rocket03-HvAT", stat: "Rocket-BB", weight: WEIGHT.MEDIUM }, // bb
 			{ res: "R-Wpn-Rocket06-IDF", stat: "Rocket-IDF", weight: WEIGHT.ULTRAHEAVY }, // ripple
 			{ res: "R-Wpn-MdArtMissile", stat: "Missile-MdArt", weight: WEIGHT.HEAVY }, // seraph
@@ -440,6 +441,7 @@ const weaponStats = {
 		],
 		defenses: [
 			{ res: "R-Defense-MRL", stat: "Emplacement-MRL-pit", defrole: DEFROLE.STANDALONE }, // mra
+			{ res: "R-Defense-MRLHvy", stat: "Emplacement-MRLHvy-pit", defrole: DEFROLE.STANDALONE }, // hra
 			{ res: "R-Defense-IDFRocket", stat: "Emplacement-Rocket06-IDF", defrole: DEFROLE.ARTY }, // ripple
 			{ res: "R-Defense-MdArtMissile", stat: "Emplacement-MdART-pit", defrole: DEFROLE.STANDALONE }, // seraph
 			{ res: "R-Defense-HvyArtMissile", stat: "Emplacement-HvART-pit", defrole: DEFROLE.ARTY }, // archie
@@ -586,9 +588,8 @@ const weaponStats = {
 		],
 		templates: [],
 		extras: [
-			"R-Wpn-AAGun-ROF06",
-			"R-Wpn-AAGun-Damage06",
-			"R-Wpn-AAGun-Accuracy03",
+			"R-Wpn-MG-ROF03",
+			"R-Wpn-MG-Damage10",
 		],
 	},
 	energy: {

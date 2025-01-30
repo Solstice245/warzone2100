@@ -41,13 +41,18 @@ enum class HostLaunch
 	Host,
 	Skirmish,
 	Autohost,
+	LoadReplay,
 };
 
 void setHostLaunch(HostLaunch value);
 HostLaunch getHostLaunch();
+void resetHostLaunch();
 
 void setHeadlessGameMode(bool enabled);
 bool headlessGameMode();
+
+void setHostLaunchStartNotReady(bool value);
+bool getHostLaunchStartNotReady();
 
 bool frontendInitVars();
 TITLECODE titleLoop();

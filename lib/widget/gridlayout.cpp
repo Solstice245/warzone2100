@@ -21,7 +21,7 @@
 #include "widgbase.h"
 #include "lib/ivis_opengl/pieblitfunc.h"
 #include <algorithm>
-#include <optional-lite/optional.hpp>
+#include <nonstd/optional.hpp>
 #include <map>
 #include <set>
 
@@ -55,7 +55,9 @@ nonstd::optional<std::vector<uint32_t>> GridLayout::getScrollSnapOffsets()
 void GridLayout::displayRecursive(WidgetGraphicsContext const &context)
 {
 	updateLayout();
-	WIDGET::displayRecursive(context);
+	auto overrideContext = context
+		.setAllowChildDisplayRecursiveIfSelfClipped(true);
+	WIDGET::displayRecursive(overrideContext);
 }
 
 void GridLayout::geometryChanged()

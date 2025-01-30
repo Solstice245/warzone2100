@@ -100,6 +100,7 @@
 #include "map.h"
 #include "keybind.h"
 #include "random.h"
+#include "urlhelpers.h"
 #include "urlrequest.h"
 #include <time.h>
 #include <LaunchInfo.h>
@@ -107,12 +108,15 @@
 #include "updatemanager.h"
 #include "activity.h"
 #include "stdinreader.h"
+#include "gamehistorylogger.h"
+#include "campaigninfo.h"
 #if defined(ENABLE_DISCORD)
 #include "integrations/wzdiscordrpc.h"
 #endif
 #include "wzcrashhandlingproviders.h"
 #include "wzpropertyproviders.h"
 #include "3rdparty/gsl_finally.h"
+#include "wzapi.h"
 
 #if defined(WZ_OS_UNIX)
 # include <signal.h>
@@ -120,9 +124,8 @@
 #endif
 
 #if defined(WZ_OS_MAC)
-// NOTE: Moving these defines is likely to (and has in the past) break the mac builds
-# include <CoreServices/CoreServices.h>
 # include <unistd.h>
+# include "lib/framework/mac_wrapper.h"
 # include "lib/framework/cocoa_wrapper.h"
 #endif // WZ_OS_MAC
 
@@ -183,6 +186,8 @@ char	ScreenDumpPath[PATH_MAX];
 char	MultiCustomMapsPath[PATH_MAX];
 char	MultiPlayersPath[PATH_MAX];
 char	KeyMapPath[PATH_MAX];
+char	FavoriteStructuresPath[PATH_MAX];
+static uint32_t forcedAutosaveTime = 0;
 // Start game in title mode:
 static GS_GAMEMODE gameStatus = GS_TITLE_SCREEN;
 // Status of the gameloop
@@ -699,7 +704,6 @@ static void initialize_PhysicsFS(const char *argv_0)
 static void check_Physfs()
 {
 	const PHYSFS_ArchiveInfo **i;
-	bool zipfound = false;
 	PHYSFS_Version compiled;
 	PHYSFS_Version linked;
 
@@ -721,10 +725,37 @@ static void check_Physfs()
 		debug(LOG_ERROR, "Please upgrade/downgrade PhysicsFS to a different version, such as 2.0.3 or 2.0.1.");
 	}
 
+	// Disable support for non-zip archive types
+	std::vector<std::string> archiveExtsToRemove;
 	for (i = PHYSFS_supportedArchiveTypes(); *i != nullptr; i++)
 	{
+		if ((*i)->extension == nullptr)
+		{
+			continue;
+		}
+		if (strcasecmp("zip", (*i)->extension) != 0)
+		{
+			archiveExtsToRemove.push_back((*i)->extension);
+		}
+	}
+	for (const auto& archiveExt : archiveExtsToRemove)
+	{
+		if (PHYSFS_deregisterArchiver(archiveExt.c_str()) == 0)
+		{
+			debug(LOG_WZ, "[**] Failed to unregister archive: [%s]", archiveExt.c_str());
+		}
+	}
+
+	// Check for "zip" archive support
+	bool zipfound = false;
+	for (i = PHYSFS_supportedArchiveTypes(); *i != nullptr; i++)
+	{
+		if ((*i)->extension == nullptr)
+		{
+			continue;
+		}
 		debug(LOG_WZ, "[**] Supported archive(s): [%s], which is [%s].", (*i)->extension, (*i)->description);
-		if (!strncasecmp("zip", (*i)->extension, 3) && !zipfound)
+		if (strcasecmp("zip", (*i)->extension) == 0)
 		{
 			zipfound = true;
 		}
@@ -735,7 +766,6 @@ static void check_Physfs()
 		exit(-1);
 	}
 }
-
 
 /*!
  * \brief Adds default data dirs
@@ -752,11 +782,6 @@ static void check_Physfs()
  */
 static void scanDataDirs()
 {
-#if defined(WZ_OS_MAC)
-	// version-independent location for video files
-	registerSearchPath("/Library/Application Support/Warzone 2100/", 1);
-#endif
-
 #if !defined(WZ_OS_MAC)
 	// Check PREFIX-based paths
 	std::string tmpstr;
@@ -769,49 +794,33 @@ static void scanDataDirs()
 	{
 		// Data in source tree (<prefix>/data/)
 		tmpstr = prefix + dirSeparator + "data" + dirSeparator;
-		registerSearchPath(tmpstr.c_str(), 3);
+		registerSearchPath(tmpstr, 3);
 		rebuildSearchPath(mod_multiplay, true);
 
 		if (!PHYSFS_exists("gamedesc.lev"))
 		{
-			// Program dir
-			registerSearchPath(PHYSFS_getBaseDir(), 4);
-			rebuildSearchPath(mod_multiplay, true);
+			// Guessed fallback default datadir on Unix
+			std::string wzDataDir = WZ_DATADIR;
+			if(!wzDataDir.empty())
+			{
+			#ifndef WZ_DATADIR_ISABSOLUTE
+				// Treat WZ_DATADIR as a relative path - append to the install PREFIX
+				tmpstr = prefix + dirSeparator + wzDataDir;
+				registerSearchPath(tmpstr, 4);
+				rebuildSearchPath(mod_multiplay, true);
+			#else
+				// Treat WZ_DATADIR as an absolute path, and use directly
+				registerSearchPath(wzDataDir, 4);
+				rebuildSearchPath(mod_multiplay, true);
+			#endif
+			}
 
 			if (!PHYSFS_exists("gamedesc.lev"))
 			{
-				// Guessed fallback default datadir on Unix
-				std::string wzDataDir = WZ_DATADIR;
-				if(!wzDataDir.empty())
-				{
-				#ifndef WZ_DATADIR_ISABSOLUTE
-					// Treat WZ_DATADIR as a relative path - append to the install PREFIX
-					tmpstr = prefix + dirSeparator + wzDataDir;
-					registerSearchPath(tmpstr.c_str(), 5);
-					rebuildSearchPath(mod_multiplay, true);
-				#else
-					// Treat WZ_DATADIR as an absolute path, and use directly
-					registerSearchPath(wzDataDir.c_str(), 5);
-					rebuildSearchPath(mod_multiplay, true);
-				#endif
-				}
-
-				if (!PHYSFS_exists("gamedesc.lev"))
-				{
-					// Relocation for AutoPackage (<prefix>/share/warzone2100/)
-					tmpstr = prefix + dirSeparator + "share" + dirSeparator + "warzone2100" + dirSeparator;
-					registerSearchPath(tmpstr.c_str(), 6);
-					rebuildSearchPath(mod_multiplay, true);
-
-					if (!PHYSFS_exists("gamedesc.lev"))
-					{
-						// Guessed fallback default datadir on Unix
-						// TEMPORARY: Fallback to ensure old WZ_DATADIR behavior as a last-resort
-						//			  This is only present for the benefit of the automake build toolchain.
-						registerSearchPath(WZ_DATADIR, 7);
-						rebuildSearchPath(mod_multiplay, true);
-					}
-				}
+				// Relocation for AutoPackage (<prefix>/share/warzone2100/)
+				tmpstr = prefix + dirSeparator + "share" + dirSeparator + "warzone2100" + dirSeparator;
+				registerSearchPath(tmpstr, 5);
+				rebuildSearchPath(mod_multiplay, true);
 			}
 		}
 	}
@@ -820,25 +829,17 @@ static void scanDataDirs()
 #ifdef WZ_OS_MAC
 	if (!PHYSFS_exists("gamedesc.lev"))
 	{
-		CFURLRef resourceURL = CFBundleCopyResourcesDirectoryURL(CFBundleGetMainBundle());
-		char resourcePath[PATH_MAX];
-		if (CFURLGetFileSystemRepresentation(resourceURL, true,
-		                                     (UInt8 *) resourcePath,
-		                                     PATH_MAX))
+		auto resourceDataPathResult = wzMacAppBundleGetResourceDirectoryPath();
+		if (resourceDataPathResult.has_value())
 		{
-			WzString resourceDataPath(resourcePath);
+			WzString resourceDataPath(resourceDataPathResult.value());
 			resourceDataPath += "/data";
-			registerSearchPath(resourceDataPath.toUtf8().c_str(), 3);
+			registerSearchPath(resourceDataPath.toUtf8(), 3);
 			rebuildSearchPath(mod_multiplay, true);
 		}
 		else
 		{
-			debug(LOG_ERROR, "Could not change to resources directory.");
-		}
-
-		if (resourceURL != NULL)
-		{
-			CFRelease(resourceURL);
+			debug(LOG_FATAL, "Could not obtain resources directory.");
 		}
 	}
 #endif
@@ -850,7 +851,15 @@ static void scanDataDirs()
 	}
 
 	// User's home dir
-	registerSearchPath(PHYSFS_getWriteDir(), 2);
+	const char *pCurrWriteDir = PHYSFS_getWriteDir();
+	if (pCurrWriteDir)
+	{
+		registerSearchPath(pCurrWriteDir, 2);
+	}
+	else
+	{
+		debug(LOG_FATAL, "No write dir set?");
+	}
 	rebuildSearchPath(mod_multiplay, true);
 
 	/** Debugging and sanity checks **/
@@ -902,17 +911,23 @@ static void make_dir(char *dest, const char *dirname, const char *subdir)
  * Preparations before entering the title (mainmenu) loop
  * Would start the timer in an event based mainloop
  */
-static void startTitleLoop()
+static void startTitleLoop(bool onInitialStartup = false)
 {
 	SetGameMode(GS_TITLE_SCREEN);
 
-	initLoadingScreen(true);
+	if (!onInitialStartup)
+	{
+		initLoadingScreen(true);
+	}
 	if (!frontendInitialise("wrf/frontend.wrf"))
 	{
 		debug(LOG_FATAL, "Shutting down after failure");
 		exit(EXIT_FAILURE);
 	}
-	closeLoadingScreen();
+	if (!onInitialStartup)
+	{
+		closeLoadingScreen();
+	}
 }
 
 
@@ -970,7 +985,8 @@ static void startGameLoop()
 	if (!levLoadData(aLevelName, &game.hash, nullptr, GTYPE_SCENARIO_START))
 	{
 		debug(LOG_FATAL, "Shutting down after failure");
-		exit(EXIT_FAILURE);
+		wzQuit(EXIT_FAILURE);
+		return;
 	}
 
 	screen_StopBackDrop();
@@ -998,8 +1014,15 @@ static void startGameLoop()
 	{
 		addMissionTimerInterface();
 	}
-	triggerEvent(TRIGGER_START_LEVEL);
+	executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_START_LEVEL); });
 	screen_disableMapPreview();
+
+	if (!bMultiPlayer && getCamTweakOption_AutosavesOnly())
+	{
+		forcedAutosaveTime = gameTime + 1000; //Really just to prevent Intel videos messages from not getting saved if run immediately.
+	}
+
+	GameStoryLogger::instance().logStartGame();
 
 	auto currentGameMode = ActivityManager::instance().getCurrentGameMode();
 	switch (currentGameMode)
@@ -1008,9 +1031,9 @@ static void startGameLoop()
 			// should not happen
 			break;
 		case ActivitySink::GameMode::CAMPAIGN:
-		case ActivitySink::GameMode::CHALLENGE:
 			// replays not currently supported
 			break;
+		case ActivitySink::GameMode::CHALLENGE:
 		case ActivitySink::GameMode::SKIRMISH:
 		case ActivitySink::GameMode::MULTIPLAYER:
 		{
@@ -1018,7 +1041,7 @@ static void startGameLoop()
 			if (!war_getDisableReplayRecording())
 			{
 				WZGameReplayOptionsHandler replayOptions;
-				NETreplaySaveStart((currentGameMode == ActivitySink::GameMode::MULTIPLAYER) ? "multiplay" : "skirmish", replayOptions, (currentGameMode == ActivitySink::GameMode::MULTIPLAYER));
+				NETreplaySaveStart((currentGameMode == ActivitySink::GameMode::MULTIPLAYER) ? "multiplay" : "skirmish", replayOptions, war_getMaxReplaysSaved(), (currentGameMode == ActivitySink::GameMode::MULTIPLAYER));
 			}
 			break;
 		}
@@ -1029,8 +1052,16 @@ static void startGameLoop()
 	setMaxFastForwardTicks(WZ_DEFAULT_MAX_FASTFORWARD_TICKS, true); // default value / spectator "catch-up" behavior
 	if (NETisReplay())
 	{
-		// for replays, ensure we don't start off fast-forwarding
-		setMaxFastForwardTicks(0, true);
+		if (!headlessGameMode() && !autogame_enabled())
+		{
+			// for replays, ensure we don't start off fast-forwarding
+			setMaxFastForwardTicks(0, true);
+		}
+		else
+		{
+			// when loading replays in headless / autogame mode, set to fast-forward
+			setMaxFastForwardTicks(10, false);
+		}
 	}
 }
 
@@ -1043,7 +1074,8 @@ static void stopGameLoop()
 {
 	clearInfoMessages(); // clear CONPRINTF messages before each new game/mission
 
-	NETreplaySaveStop();
+	WZGameReplayOptionsHandler replayOptions;
+	NETreplaySaveStop(replayOptions);
 	NETshutdownReplay();
 
 	if (gameLoopStatus != GAMECODE_NEWLEVEL)
@@ -1052,6 +1084,7 @@ static void stopGameLoop()
 		initLoadingScreen(true); // returning to f.e. do a loader.render not active
 		if (gameLoopStatus != GAMECODE_LOADGAME)
 		{
+			game.modHashes.clear(); // must clear this before calling levReleaseAll so that when search paths are reloaded we don't reload mods downloaded for the last game (or loaded for the last replay)
 			if (!levReleaseAll())
 			{
 				debug(LOG_ERROR, "levReleaseAll failed!");
@@ -1061,6 +1094,10 @@ static void stopGameLoop()
 				player.resetAll();
 			}
 			NetPlay.players.resize(MAX_CONNECTED_PLAYERS);
+			for (size_t i = 0; i < NetPlay.scriptSetPlayerDataStrings.size(); i++)
+			{
+				NetPlay.scriptSetPlayerDataStrings[i].clear();
+			}
 		}
 		closeLoadingScreen();
 		reloadMPConfig();
@@ -1079,7 +1116,10 @@ static void stopGameLoop()
 		wzSetWindowIsResizable(true);
 	}
 
+	GameStoryLogger::instance().reset();
+
 	gameInitialised = false;
+	forcedAutosaveTime = 0;
 }
 
 
@@ -1136,6 +1176,35 @@ static bool initSaveGameLoad()
  */
 static void runGameLoop()
 {
+	// Run the second half of a queued gameloopstatus change
+	// (This is needed so that the main loop completes once between initializing the loading screen and actually loading)
+	switch (gameLoopStatus)
+	{
+	case GAMECODE_QUITGAME:
+		debug(LOG_MAIN, "GAMECODE_QUITGAME");
+		ActivityManager::instance().quitGame(collectEndGameStatsData(), Cheated);
+		cdAudio_SetGameMode(MusicGameMode::MENUS);
+		stopGameLoop();
+		startTitleLoop(); // Restart into titleloop
+		gameLoopStatus = GAMECODE_CONTINUE;
+		return;
+	case GAMECODE_LOADGAME:
+		debug(LOG_MAIN, "GAMECODE_LOADGAME");
+		stopGameLoop();
+		initSaveGameLoad(); // Restart and load a savegame
+		gameLoopStatus = GAMECODE_CONTINUE;
+		return;
+	case GAMECODE_NEWLEVEL:
+		debug(LOG_MAIN, "GAMECODE_NEWLEVEL");
+		stopGameLoop();
+		startGameLoop(); // Restart gameloop
+		gameLoopStatus = GAMECODE_CONTINUE;
+		return;
+	default:
+		// ignore other values, and proceed with gameLoop
+		break;
+	}
+
 	gameLoopStatus = gameLoop();
 	switch (gameLoopStatus)
 	{
@@ -1144,20 +1213,15 @@ static void runGameLoop()
 		break;
 	case GAMECODE_QUITGAME:
 		debug(LOG_MAIN, "GAMECODE_QUITGAME");
-		ActivityManager::instance().quitGame(collectEndGameStatsData(), Cheated);
-		cdAudio_SetGameMode(MusicGameMode::MENUS);
-		stopGameLoop();
-		startTitleLoop(); // Restart into titleloop
+		initLoadingScreen(true);
 		break;
 	case GAMECODE_LOADGAME:
 		debug(LOG_MAIN, "GAMECODE_LOADGAME");
-		stopGameLoop();
-		initSaveGameLoad(); // Restart and load a savegame
+		initLoadingScreen(true);
 		break;
 	case GAMECODE_NEWLEVEL:
 		debug(LOG_MAIN, "GAMECODE_NEWLEVEL");
-		stopGameLoop();
-		startGameLoop(); // Restart gameloop
+		initLoadingScreen(true);
 		break;
 	// Never thrown:
 	case GAMECODE_FASTEXIT:
@@ -1170,11 +1234,48 @@ static void runGameLoop()
 }
 
 
+static optional<TITLECODE> queuedTilecodeChange = nullopt;
+
 /*!
  * Run the code inside the titleloop
  */
 static void runTitleLoop()
 {
+	if (queuedTilecodeChange.has_value())
+	{
+		// Run the second half of a queued titlecode change
+		// (This is needed so that the main loop completes once between initializing the loading screen and actually loading)
+		TITLECODE toProcess = queuedTilecodeChange.value();
+		queuedTilecodeChange.reset();
+		switch (toProcess)
+		{
+		case TITLECODE_SAVEGAMELOAD:
+			{
+				debug(LOG_MAIN, "TITLECODE_SAVEGAMELOAD");
+				// Restart into gameloop and load a savegame, ONLY on a good savegame load!
+				stopTitleLoop();
+				if (!initSaveGameLoad())
+				{
+					// we had a error loading savegame (corrupt?), so go back to title screen?
+					stopGameLoop();
+					startTitleLoop();
+					changeTitleMode(TITLE);
+				}
+				closeLoadingScreen();
+				return;
+			}
+		case TITLECODE_STARTGAME:
+			debug(LOG_MAIN, "TITLECODE_STARTGAME");
+			stopTitleLoop();
+			startGameLoop(); // Restart into gameloop
+			closeLoadingScreen();
+			return;
+		default:
+			// ignore unexpected value
+			break;
+		}
+	}
+
 	switch (titleLoop())
 	{
 	case TITLECODE_CONTINUE:
@@ -1188,24 +1289,13 @@ static void runTitleLoop()
 		{
 			debug(LOG_MAIN, "TITLECODE_SAVEGAMELOAD");
 			initLoadingScreen(true);
-			// Restart into gameloop and load a savegame, ONLY on a good savegame load!
-			stopTitleLoop();
-			if (!initSaveGameLoad())
-			{
-				// we had a error loading savegame (corrupt?), so go back to title screen?
-				stopGameLoop();
-				startTitleLoop();
-				changeTitleMode(TITLE);
-			}
-			closeLoadingScreen();
+			queuedTilecodeChange = TITLECODE_SAVEGAMELOAD;
 			break;
 		}
 	case TITLECODE_STARTGAME:
 		debug(LOG_MAIN, "TITLECODE_STARTGAME");
 		initLoadingScreen(true);
-		stopTitleLoop();
-		startGameLoop(); // Restart into gameloop
-		closeLoadingScreen();
+		queuedTilecodeChange = TITLECODE_STARTGAME;
 		break;
 	case TITLECODE_SHOWINTRO:
 		debug(LOG_MAIN, "TITLECODE_SHOWINTRO");
@@ -1228,6 +1318,8 @@ void mainLoop()
 {
 	frameUpdate(); // General housekeeping
 
+	pie_ScreenFrameRenderBegin();
+
 	// Screenshot key is now available globally
 	if (keyPressed(KEY_F10))
 	{
@@ -1242,19 +1334,28 @@ void mainLoop()
 		if (loop_GetVideoStatus())
 		{
 			videoLoop(); // Display the video if necessary
+			pie_ScreenFrameRenderEnd();
 		}
 		else switch (GetGameMode())
 			{
 			case GS_NORMAL: // Run the gameloop code
 				runGameLoop();
+				// gameLoop handles pie_ScreenFrameRenderEnd()
 				break;
 			case GS_TITLE_SCREEN: // Run the titleloop code
 				runTitleLoop();
+				pie_ScreenFrameRenderEnd();
 				break;
 			default:
 				break;
 			}
 		realTimeUpdate(); // Update realTime.
+	}
+
+	if ((forcedAutosaveTime != 0) && (gameTime > forcedAutosaveTime))
+	{
+		forcedAutosaveTime = 0;
+		autoSave(true);
 	}
 
 	wzApplyCursor();
@@ -1264,7 +1365,7 @@ void mainLoop()
 #endif
 }
 
-bool getUTF8CmdLine(int *const utfargc WZ_DECL_UNUSED, char *** const utfargv WZ_DECL_UNUSED) // explicitely pass by reference
+bool getUTF8CmdLine(int *const _utfargc WZ_DECL_UNUSED, char *** const _utfargv WZ_DECL_UNUSED) // explicitely pass by reference
 {
 #ifdef WZ_OS_WIN
 	int wargc;
@@ -1285,8 +1386,8 @@ bool getUTF8CmdLine(int *const utfargc WZ_DECL_UNUSED, char *** const utfargv WZ
 		return false;
 	}
 	// the following malloc and UTF16toUTF8 will be cleaned up in realmain().
-	*utfargv = (char **)malloc(sizeof(char *) * wargc);
-	if (!*utfargv)
+	*_utfargv = (char **)malloc(sizeof(char *) * wargc);
+	if (!*_utfargv)
 	{
 		debug(LOG_FATAL, "Out of memory!");
 		abort();
@@ -1295,22 +1396,31 @@ bool getUTF8CmdLine(int *const utfargc WZ_DECL_UNUSED, char *** const utfargv WZ
 	for (int i = 0; i < wargc; ++i)
 	{
 		STATIC_ASSERT(sizeof(wchar_t) == sizeof(utf_16_char)); // Should be true on windows
-		(*utfargv)[i] = UTF16toUTF8((const utf_16_char *)wargv[i], NULL); // only returns null when memory runs out
-		if ((*utfargv)[i] == NULL)
+		(*_utfargv)[i] = UTF16toUTF8((const utf_16_char *)wargv[i], NULL); // only returns null when memory runs out
+		if ((*_utfargv)[i] == NULL)
 		{
-			*utfargc = i;
+			*_utfargc = i;
 			LocalFree(wargv);
 			abort();
 			return false;
 		}
 	}
-	*utfargc = wargc;
+	*_utfargc = wargc;
 	LocalFree(wargv);
 #endif
 	return true;
 }
 
 #if defined(WZ_OS_WIN)
+
+// Special exports to default to high-performance GPU on multi-GPU systems
+extern "C" {
+	// https://developer.download.nvidia.com/devzone/devcenter/gamegraphics/files/OptimusRenderingPolicies.pdf
+	__declspec(dllexport) DWORD NvOptimusEnablement = 0x00000001;
+
+	// https://gpuopen.com/learn/amdpowerxpressrequesthighperformance/
+	__declspec(dllexport) DWORD AmdPowerXpressRequestHighPerformance = 0x00000001;
+}
 
 typedef BOOL (WINAPI *SetDefaultDllDirectoriesFunction)(
   DWORD DirectoryFlags
@@ -1412,57 +1522,94 @@ static bool winCheckIfRunningUnderWine(std::string* output_wineinfostr = nullptr
 	typedef const char* (CDECL *WineGetVersionFunction)(void);
 	typedef void (CDECL *WineGetHostVersionFunction)(const char **sysname, const char **release);
 
-	HMODULE hntdll = GetModuleHandleW(L"ntdll.dll");
-	if (!hntdll)
-	{
-		return false;
-	}
-
-	WineGetVersionFunction pWineGetVersion = reinterpret_cast<WineGetVersionFunction>(reinterpret_cast<void*>(GetProcAddress(hntdll, "wine_get_version")));
-	WineGetHostVersionFunction pWineGetHostVersion = reinterpret_cast<WineGetHostVersionFunction>(reinterpret_cast<void*>(GetProcAddress(hntdll, "wine_get_host_version")));
-
-	if (pWineGetVersion == nullptr)
-	{
-		return false;
-	}
-
+	bool bResult = false;
 	std::string resultWineVersionInfo = "Wine";
-	const char* pWineVer = pWineGetVersion();
-	if (pWineVer != nullptr)
-	{
-		resultWineVersionInfo += std::string(" ") + pWineVer;
-	}
 
-	const char* pSysname = nullptr;
-	const char* pSysversion = nullptr;
-	if (pWineGetHostVersion != nullptr)
+	HMODULE hntdll = GetModuleHandleW(L"ntdll.dll");
+	if (hntdll != NULL)
 	{
-		pWineGetHostVersion(&pSysname, &pSysversion);
-	}
-	if (pSysname != nullptr)
-	{
-		if (output_platform)
+		WineGetVersionFunction pWineGetVersion = reinterpret_cast<WineGetVersionFunction>(reinterpret_cast<void*>(GetProcAddress(hntdll, "wine_get_version")));
+		WineGetHostVersionFunction pWineGetHostVersion = reinterpret_cast<WineGetHostVersionFunction>(reinterpret_cast<void*>(GetProcAddress(hntdll, "wine_get_host_version")));
+
+		if (pWineGetVersion == nullptr && pWineGetHostVersion == nullptr && !bResult)
 		{
-			(*output_platform) = pSysname;
+			auto ptrWineSetUnixEnv = GetProcAddress(hntdll, "__wine_set_unix_env");
+			if (ptrWineSetUnixEnv != NULL)
+			{
+				bResult = true;
+			}
 		}
-		resultWineVersionInfo += std::string(" (under ") + pSysname;
-		if (pSysversion != nullptr)
+
+		if (pWineGetVersion != nullptr)
 		{
-			resultWineVersionInfo += std::string(" ") + pSysversion;
+			bResult = true;
+			const char* pWineVer = pWineGetVersion();
+			if (pWineVer != nullptr)
+			{
+				resultWineVersionInfo += std::string(" ") + pWineVer;
+			}
 		}
-		resultWineVersionInfo += ")";
+
+		const char* pSysname = nullptr;
+		const char* pSysversion = nullptr;
+		if (pWineGetHostVersion != nullptr)
+		{
+			bResult = true;
+			pWineGetHostVersion(&pSysname, &pSysversion);
+		}
+		if (pSysname != nullptr)
+		{
+			if (output_platform)
+			{
+				(*output_platform) = pSysname;
+			}
+			resultWineVersionInfo += std::string(" (under ") + pSysname;
+			if (pSysversion != nullptr)
+			{
+				resultWineVersionInfo += std::string(" ") + pSysversion;
+			}
+			resultWineVersionInfo += ")";
+		}
 	}
 
-	if (output_wineinfostr)
+	if (!bResult)
 	{
-		(*output_wineinfostr) = resultWineVersionInfo;
+		HMODULE hKernel32 = GetModuleHandleW(L"kernel32.dll");
+		if (hKernel32 != NULL)
+		{
+			auto wineUnixFileNameFuncPt = GetProcAddress(hKernel32, "wine_get_unix_file_name");
+			if (wineUnixFileNameFuncPt != NULL)
+			{
+				bResult = true;
+			}
+			else
+			{
+				auto wineDosFileNameFuncPt = GetProcAddress(hKernel32, "wine_get_dos_file_name");
+				if (wineDosFileNameFuncPt != NULL)
+				{
+					bResult = true;
+				}
+			}
+		}
 	}
 
-	return true;
+	if (bResult)
+	{
+		if (output_wineinfostr)
+		{
+			(*output_wineinfostr) = resultWineVersionInfo;
+		}
+	}
+
+	return bResult;
 #else
 	return false;
 #endif /* WINAPI_FAMILY_PARTITION(WINAPI_PARTITION_DESKTOP) */
 }
+
+#define WINEOPENURLWRAPPER(url, cl) \
+openURLInBrowser(url); \
+if (cl) { wzQuit(0); }
 
 void osSpecificPostInit_Win()
 {
@@ -1471,25 +1618,52 @@ void osSpecificPostInit_Win()
 	if (winCheckIfRunningUnderWine(&wineInfoStr, &wineHostPlatform))
 	{
 		const char* pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2100 under Wine.\n\nA native version for your platform is likely available (and will perform better).\n\nPlease visit: https://wz2100.net";
+		std::string platformSimple;
 		// Display a messagebox that a native version is available for this platform
 		if (!wineHostPlatform.empty())
 		{
 			if (strncasecmp(wineHostPlatform.c_str(), "Darwin", std::min<size_t>(wineHostPlatform.size(), strlen("Darwin"))) == 0)
 			{
 				// macOS
+				platformSimple = "macOS";
 				pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2100 under Wine.\n\nA native version for macOS is available.\n\nPlease visit: https://wz2100.net";
 			}
 			if (strncasecmp(wineHostPlatform.c_str(), "Linux", std::min<size_t>(wineHostPlatform.size(), strlen("Linux"))) == 0)
 			{
 				// Linux
+				platformSimple = "Linux";
 				pWineNativeAvailableMsg = "You are running the Windows version of Warzone 2100 under Wine.\n\nNative builds for Linux are available.\n\nPlease visit: https://wz2100.net";
 			}
 		}
 
 		wzDisplayDialog(Dialog_Information, "Warzone 2100 under Wine", pWineNativeAvailableMsg);
+
+		std::string url = "https://warzone2100.github.io/update-data/redirect/wine.html";
+		std::string queryString;
+		if (!platformSimple.empty())
+		{
+			queryString += (queryString.empty()) ? "?" : "&";
+			queryString += std::string("platform=") + platformSimple;
+		}
+		std::string variant;
+		if ((GetEnvironmentVariableW(L"STEAM_COMPAT_APP_ID", NULL, 0) > 0) || (GetEnvironmentVariableW(L"SteamAppId", NULL, 0) > 0))
+		{
+			variant = "Proton";
+		}
+		if (!variant.empty())
+		{
+			queryString += (queryString.empty()) ? "?" : "&";
+			queryString += std::string("variant=") + variant;
+		}
+		url += queryString;
+		WINEOPENURLWRAPPER(url.c_str(), !variant.empty())
 	}
 }
 #endif /* defined(WZ_OS_WIN) */
+
+#if defined(__EMSCRIPTEN__)
+# include "emscripten_helpers.h"
+#endif
 
 void osSpecificFirstChanceProcessSetup()
 {
@@ -1509,15 +1683,32 @@ void osSpecificFirstChanceProcessSetup()
 #else
 	// currently, no-op
 #endif
+
+#if defined(__EMSCRIPTEN__) // must be separate, because WZ_OS_UNIX is also defined for emscripten builds
+	initWZEmscriptenHelpers();
+#endif
 }
 
 void osSpecificPostInit()
 {
 #if defined(WZ_OS_WIN)
 	osSpecificPostInit_Win();
+#elif defined(__EMSCRIPTEN__)
+	initWZEmscriptenHelpers_PostInit();
 #else
 	// currently, no-op
 #endif
+
+	// Perform sanity check that CRC functions were built with proper endianness configuration
+	uint32_t crc = wz::crc_init();
+	uint8_t checkByteArray[] = {0x31, 0x32, 0x33, 0x34, 0x35, 0x36, 0x37, 0x38, 0x39};
+	constexpr uint32_t expected_crc = 0xcbf43926;
+	crc = wz::crc_update(crc, checkByteArray, 9);
+	uint32_t finalized_crc = ~crc;
+	if (finalized_crc != expected_crc)
+	{
+		debug(LOG_FATAL, "CRC check failed (value: 0x%08x, expected: 0x%08x)", finalized_crc, expected_crc);
+	}
 }
 
 static std::string getDefaultLogFilePath(const char *platformDirSeparator)
@@ -1547,6 +1738,11 @@ static bool initializeCrashHandlingContext(optional<video_backend> gfxbackend)
 		gfxBackendString = to_string(gfxbackend.value());
 	}
 	crashHandlingProviderSetTag("wz.gfx_backend", gfxBackendString);
+
+	auto systemRamMiB = wzGetCurrentSystemRAM();
+	std::string systemRamString = std::to_string(systemRamMiB);
+	crashHandlingProviderSetTag("wz.system_ram", systemRamString);
+
 	auto backendInfo = gfx_api::context::get().getBackendGameInfo();
 	// Truncate absurdly long backend info values (if needed - common culprit is GL_EXTENSIONS)
 	const size_t MAX_BACKENDINFO_VALUE_LENGTH = 2048;
@@ -1566,24 +1762,26 @@ static bool initializeCrashHandlingContext(optional<video_backend> gfxbackend)
 
 static void wzCmdInterfaceInit()
 {
-	switch (wz_command_interface())
+	if (wz_command_interface_enabled())
 	{
-		case WZ_Command_Interface::None:
-			return;
-		case WZ_Command_Interface::StdIn_Interface:
-			stdInThreadInit();
-			break;
+		cmdInterfaceThreadInit();
 	}
 }
 
 static void wzCmdInterfaceShutdown()
 {
-	stdInThreadShutdown();
+	cmdInterfaceThreadShutdown();
 }
 
 static void cleanupOldLogFiles()
 {
-	constexpr int MAX_OLD_LOGS = 50;
+	const int MAX_OLD_LOGS = war_getOldLogsLimit();
+	if (MAX_OLD_LOGS < 0)
+	{
+		// skip cleanup
+		return;
+	}
+
 	ASSERT_OR_RETURN(, PHYSFS_isInit() != 0, "PhysFS isn't initialized");
 	// safety check to ensure we *never* delete the current log file
 	WzString fullCurrentLogFileName = WzString::fromUtf8(getDefaultLogFilePath("/"));
@@ -1618,19 +1816,97 @@ static void cleanupOldLogFiles()
 	});
 }
 
+static void mainProcessCompatCheckResults(CompatCheckResults results)
+{
+	// Since this may be called from any thread, use wzAsyncExecOnMainThread
+	wzAsyncExecOnMainThread([results]() {
+		if (!results.successfulCheck)
+		{
+			return;
+		}
+		if (!results.hasIssue())
+		{
+			return;
+		}
+
+		// supported_terrain
+		auto& configFlags = results.issue.value().configFlags;
+		if (configFlags.supportedTerrain.count(getTerrainShaderQuality()) == 0)
+		{
+			// current terrain mode is not in supported list
+			// if not in a game, change the terrain shader quality back to default
+			if (GetGameMode() != GS_NORMAL)
+			{
+				setTerrainShaderQuality(TerrainShaderQuality::MEDIUM);
+			}
+		}
+		// multilobby
+		if (!configFlags.multilobby)
+		{
+			NET_setLobbyDisabled(results.issue.value().infoLink);
+		}
+	});
+}
+
 // for backend detection
 extern const char *BACKEND;
 
+static int utfargc = 0;
+static char **utfargv = nullptr;
+
+void mainShutdown()
+{
+	ActivityManager::instance().preSystemShutdown();
+
+	switch (GetGameMode())
+	{
+		case GS_NORMAL:
+			// if running a game while quitting, stop the game loop
+			// (currently required for some cleanup) (should modelShutdown() be added to systemShutdown?)
+			stopGameLoop();
+			break;
+		case GS_TITLE_SCREEN:
+			// if showing the title / menus while quitting, stop the title loop
+			// (currently required for some cleanup)
+			stopTitleLoop();
+			break;
+		default:
+			break;
+	}
+	saveConfig();
+	writeFavoriteStructsFile(FavoriteStructuresPath);
+#if defined(ENABLE_DISCORD)
+	discordRPCShutdown();
+#endif
+	wzCmdInterfaceShutdown();
+	urlRequestShutdown();
+	cleanupOldLogFiles();
+	systemShutdown();
+#ifdef WZ_OS_WIN	// clean up the memory allocated for the command line conversion
+	for (int i = 0; i < utfargc; i++)
+	{
+		char *** const utfargvF = &utfargv;
+		free((void *)(*utfargvF)[i]);
+	}
+	free(utfargv);
+#endif
+	ActivityManager::instance().shutdown();
+}
+
 int realmain(int argc, char *argv[])
 {
-	int utfargc = argc;
-	char **utfargv = (char **)argv;
+	utfargc = argc;
+	utfargv = (char **)argv;
 
 	osSpecificFirstChanceProcessSetup();
 
 	debug_init();
+#if defined(__EMSCRIPTEN__)
+	debug_register_callback(debug_callback_emscripten_log, nullptr, nullptr, nullptr);
+#else
 	debug_register_callback(debug_callback_stderr, nullptr, nullptr, nullptr);
-#if defined(WZ_OS_WIN) && defined(DEBUG_INSANE)
+#endif
+#if defined(_WIN32) && defined(DEBUG_INSANE)
 	debug_register_callback(debug_callback_win32debug, NULL, NULL, NULL);
 #endif // WZ_OS_WIN && DEBUG_INSANE
 
@@ -1642,15 +1918,22 @@ int realmain(int argc, char *argv[])
 		return EXIT_FAILURE;
 	}
 
+	// find debugging flags extra early
+	if (!ParseCommandLineDebugFlags(utfargc, utfargv))
+	{
+		return EXIT_FAILURE;
+	}
+
 	/*** Initialize PhysicsFS ***/
 	initialize_PhysicsFS(utfargv[0]);
 
 	/** Initialize crash-handling provider, if configured */
 	/** NOTE: Should come as early as possible in process init, but needs to be after initialize_PhysicsFS because we need the platform pref dir for storing temporary crash files... */
-	bool bCrashHandlingProvider = useCrashHandlingProvider(utfargc, utfargv);
+	bool debugCrashHandler = false;
+	bool bCrashHandlingProvider = useCrashHandlingProvider(utfargc, utfargv, debugCrashHandler);
 	if (bCrashHandlingProvider)
 	{
-		bCrashHandlingProvider = initCrashHandlingProvider(getWzPlatformPrefDir(), getDefaultLogFilePath(PHYSFS_getDirSeparator()));
+		bCrashHandlingProvider = initCrashHandlingProvider(getWzPlatformPrefDir(), getDefaultLogFilePath(PHYSFS_getDirSeparator()), debugCrashHandler);
 	}
 	auto shutdown_crash_handling_provider_on_return = gsl::finally([bCrashHandlingProvider] { if (bCrashHandlingProvider) { shutdownCrashHandlingProvider(); } });
 
@@ -1677,9 +1960,10 @@ int realmain(int argc, char *argv[])
 	urlRequestInit();
 
 	// find early boot info
-	if (!ParseCommandLineEarly(utfargc, utfargv))
+	ParseCLIEarlyResult earlyCommandLineParsingResult = ParseCommandLineEarly(utfargc, utfargv);
+	if (earlyCommandLineParsingResult != ParseCLIEarlyResult::OK_CONTINUE)
 	{
-		return EXIT_FAILURE;
+		return (earlyCommandLineParsingResult == ParseCLIEarlyResult::HANDLED_QUIT_EARLY_COMMAND) ? 0 : EXIT_FAILURE;
 	}
 
 	/* Initialize the write/config directory for PhysicsFS.
@@ -1700,7 +1984,7 @@ int realmain(int argc, char *argv[])
 	make_dir(MultiCustomMapsPath, "maps", nullptr); // needed to prevent crashes when getting map
 
 	PHYSFS_mkdir(version_getVersionedModsFolderPath("autoload").c_str());	// mods that are automatically loaded
-	PHYSFS_mkdir(version_getVersionedModsFolderPath("campaign").c_str());	// campaign only mods activated with --mod_ca=example.wz
+	PHYSFS_mkdir("mods/campaign");	// campaign only mods - no longer versioned because of new campaign mod packaging and selector
 	PHYSFS_mkdir("mods/downloads");	// mod download directory - NOT currently versioned
 	PHYSFS_mkdir(version_getVersionedModsFolderPath("global").c_str());	// global mods activated with --mod=example.wz
 	PHYSFS_mkdir(version_getVersionedModsFolderPath("multiplay").c_str());	// multiplay only mods activated with --mod_mp=example.wz
@@ -1762,6 +2046,7 @@ int realmain(int argc, char *argv[])
 
 	/* Put in the writedir root */
 	sstrcpy(KeyMapPath, "keymap.json");
+	sstrcpy(FavoriteStructuresPath, "favoriteStructures.json");
 
 	// initialise all the command line states
 	war_SetDefaultStates();
@@ -1769,6 +2054,7 @@ int realmain(int argc, char *argv[])
 	debug(LOG_MAIN, "initializing");
 
 	loadConfig();
+	loadFavoriteStructsFile(FavoriteStructuresPath);
 
 	// parse the command line
 	if (!ParseCommandLine(utfargc, utfargv))
@@ -1877,7 +2163,7 @@ int realmain(int argc, char *argv[])
 	{
 		gfxbackend = war_getGfxBackend();
 	}
-	if (!wzMainScreenSetup(gfxbackend, war_getAntialiasing(), war_getWindowMode(), war_GetVsync()))
+	if (!wzMainScreenSetup(gfxbackend, war_getAntialiasing(), war_getWindowMode(), war_GetVsync(), war_getLODDistanceBiasPercentage(), war_getShadowMapResolution()))
 	{
 		saveConfig(); // ensure any setting changes are persisted on failure
 		return EXIT_FAILURE;
@@ -1900,12 +2186,16 @@ int realmain(int argc, char *argv[])
 	ssprintf(buf, "Video Mode %d x %d (%s)", w, h, to_display_string(war_getWindowMode()).c_str());
 	addDumpInfo(buf);
 
-	float horizScaleFactor, vertScaleFactor;
-	wzGetGameToRendererScaleFactor(&horizScaleFactor, &vertScaleFactor);
-	debug(LOG_WZ, "Game to Renderer Scale Factor (w x h): %f x %f", horizScaleFactor, vertScaleFactor);
+	unsigned int horizScaleFactor, vertScaleFactor;
+	wzGetGameToRendererScaleFactorInt(&horizScaleFactor, &vertScaleFactor);
+	debug(LOG_WZ, "Game to Renderer Scale Factor (w x h): %u%% x %u%%", horizScaleFactor, vertScaleFactor);
 
 	debug(LOG_MAIN, "Final initialization");
 	if (!frameInitialise())
+	{
+		return EXIT_FAILURE;
+	}
+	if (!pie_LoadShaders(war_getShadowFilterSize(), war_getPointLightPerPixelLighting() && getTerrainShaderQuality() == TerrainShaderQuality::NORMAL_MAPPING))
 	{
 		return EXIT_FAILURE;
 	}
@@ -1913,28 +2203,16 @@ int realmain(int argc, char *argv[])
 	{
 		return EXIT_FAILURE;
 	}
-	if (!pie_LoadShaders())
-	{
-		return EXIT_FAILURE;
-	}
-
-	if (!headlessGameMode())
-	{
-		unsigned int windowWidth = 0, windowHeight = 0;
-		wzGetWindowResolution(nullptr, &windowWidth, &windowHeight);
-		war_SetWidth(windowWidth);
-		war_SetHeight(windowHeight);
-	}
 
 	bool fogConfigOption = pie_GetFogEnabled();
 	pie_SetFogStatus(false);
-	pie_ScreenFlip(CLEAR_BLACK);
 
 	pal_Init();
 
 	pie_LoadBackDrop(SCREEN_RANDOMBDROP);
 	pie_SetFogStatus(false);
-	pie_ScreenFlip(CLEAR_BLACK);
+
+	pie_ScreenFrameRenderEnd();
 
 	if (!systemInitialise(horizScaleFactor, vertScaleFactor))
 	{
@@ -1962,7 +2240,7 @@ int realmain(int argc, char *argv[])
 	switch (GetGameMode())
 	{
 	case GS_TITLE_SCREEN:
-		startTitleLoop();
+		startTitleLoop(true);
 		break;
 	case GS_SAVEGAMELOAD:
 		if (headlessGameMode())
@@ -1979,6 +2257,7 @@ int realmain(int argc, char *argv[])
 		break;
 	}
 
+	asyncGetCompatCheckResults(mainProcessCompatCheckResults);
 	WzInfoManager::initialize();
 #if defined(ENABLE_DISCORD)
 	discordRPCInitialize();
@@ -1998,41 +2277,8 @@ int realmain(int argc, char *argv[])
 
 	osSpecificPostInit();
 
-	wzMainEventLoop();
-	ActivityManager::instance().preSystemShutdown();
+	wzMainEventLoop(mainShutdown);
 
-	switch (GetGameMode())
-	{
-		case GS_NORMAL:
-			// if running a game while quitting, stop the game loop
-			// (currently required for some cleanup) (should modelShutdown() be added to systemShutdown?)
-			stopGameLoop();
-			break;
-		case GS_TITLE_SCREEN:
-			// if showing the title / menus while quitting, stop the title loop
-			// (currently required for some cleanup)
-			stopTitleLoop();
-			break;
-		default:
-			break;
-	}
-	saveConfig();
-#if defined(ENABLE_DISCORD)
-	discordRPCShutdown();
-#endif
-	wzCmdInterfaceShutdown();
-	urlRequestShutdown();
-	cleanupOldLogFiles();
-	systemShutdown();
-#ifdef WZ_OS_WIN	// clean up the memory allocated for the command line conversion
-	for (int i = 0; i < argc; i++)
-	{
-		char *** const utfargvF = &utfargv;
-		free((void *)(*utfargvF)[i]);
-	}
-	free(utfargv);
-#endif
-	ActivityManager::instance().shutdown();
 	int exitCode = wzGetQuitExitCode();
 	wzShutdown();
 	debug(LOG_MAIN, "Completed shutting down Warzone 2100");

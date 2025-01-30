@@ -80,7 +80,7 @@ struct ImdObject
 	static ImdObject Feature(BASE_STATS *p)
 	{
 		FEATURE_STATS *fStat = (FEATURE_STATS *)p;
-		return ImdObject(fStat->psImd, IMDTYPE_FEATURE);
+		return ImdObject((fStat->psImd) ? fStat->psImd->displayModel() : nullptr, IMDTYPE_FEATURE);
 	}
 
 	bool empty() const
@@ -94,6 +94,8 @@ struct ImdObject
 private:
 	ImdObject(void *ptr, ImdType type) : ptr(ptr), type(type) {}
 };
+
+ImdObject getResearchObjectImage(RESEARCH *research);
 
 // Set audio IDs for form opening/closing anims.
 void SetFormAudioIDs(int OpenID, int CloseID);
@@ -128,9 +130,9 @@ protected:
 
 	void initDisplay();
 	void displayClear(int xOffset, int yOffset);
-	void displayIMD(Image image, ImdObject imdObject, int xOffset, int yOffset);
-	void displayImage(Image image, int xOffset, int yOffset);
-	void displayBlank(int xOffset, int yOffset);
+	void displayIMD(AtlasImage image, ImdObject imdObject, int xOffset, int yOffset);
+	void displayImage(AtlasImage image, int xOffset, int yOffset);
+	void displayBlank(int xOffset, int yOffset, bool withQuestionMark = true);
 	void displayIfHighlight(int xOffset, int yOffset);
 
 	struct
@@ -141,6 +143,7 @@ protected:
 		int rate;
 	} model;
 	ButtonType buttonType;  // TOPBUTTON is square, BTMBUTTON has a little up arrow.
+	bool buttonBackgroundEmpty = false;
 };
 
 class IntObjectButton : public IntFancyButton
@@ -201,7 +204,7 @@ public:
 	void setStatsAndTip(BASE_STATS *stats)
 	{
 		setStats(stats);
-		setTip(getStatsName(stats));
+		setTip(getLocalizedStatsName(stats));
 	}
 
 protected:
@@ -225,12 +228,14 @@ public:
 
 	virtual void display(int xOffset, int yOffset);
 
-	void closeAnimateDelete();              ///< Animates the form closing, and deletes itself when done.
+	typedef std::function<void (IntFormAnimated&)> W_ANIMATED_ON_CLOSE_FUNC;
+	void closeAnimateDelete(const W_ANIMATED_ON_CLOSE_FUNC& onCloseAnimateFinished = nullptr);              ///< Animates the form closing, and deletes itself when done.
 	bool isClosing() const;
 
 private:
 	unsigned        startTime;              ///< Animation start time
 	int             currentAction;          ///< Opening/open/closing/closed.
+	W_ANIMATED_ON_CLOSE_FUNC	onCloseAnimFinished;
 };
 
 void intDisplayImage(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
@@ -250,7 +255,7 @@ bool DroidIsBuilding(DROID *Droid);
 STRUCTURE *DroidGetBuildStructure(DROID *Droid);
 bool DroidGoingToBuild(DROID *Droid);
 BASE_STATS *DroidGetBuildStats(DROID *Droid);
-iIMDShape *DroidGetIMD(DROID *Droid);
+iIMDBaseShape *DroidGetIMD(DROID *Droid);
 
 bool StructureIsManufacturingPending(STRUCTURE *structure);   ///< Returns true iff the structure is either manufacturing or on hold (even if not yet synchronised). (But ignores research.)
 bool structureIsResearchingPending(STRUCTURE *structure);     ///< Returns true iff the structure is either researching or on hold (even if not yet synchronised). (But ignores manufacturing.)
@@ -261,7 +266,7 @@ RESEARCH_FACILITY *StructureGetResearch(STRUCTURE *Structure);
 FACTORY *StructureGetFactory(STRUCTURE *Structure);
 
 bool StatIsStructure(BASE_STATS const *Stat);
-iIMDShape *StatGetStructureIMD(BASE_STATS *Stat, UDWORD Player);
+iIMDBaseShape *StatGetStructureIMD(BASE_STATS *Stat, UDWORD Player);
 bool StatIsTemplate(BASE_STATS *Stat);
 bool StatIsFeature(BASE_STATS const *Stat);
 
@@ -295,7 +300,7 @@ void drawRadarBlips(int radarX, int radarY, float pixSizeH, float pixSizeV, cons
 /*Displays the proximity messages blips over the world*/
 void intDisplayProximityBlips(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
 
-void intUpdateQuantitySlider(WIDGET *psWidget, W_CONTEXT *psContext);
+void intUpdateQuantitySlider(WIDGET *psWidget, const W_CONTEXT *psContext);
 
 void intDisplayMissionClock(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset);
 

@@ -7,7 +7,7 @@ include("multiplay/script/rules/variables.js");
 // This file contain functions which contains the logic of technology research equated to time
 include("multiplay/script/functions/camTechEnabler.js");
 
-// Spectial effects of weather.
+// Special effects of weather.
 include("multiplay/script/functions/weather.js");
 
 /* *** SETUP *** */
@@ -22,7 +22,6 @@ include("multiplay/script/rules/setup/research.js");
 include("multiplay/script/rules/setup/components.js");
 include("multiplay/script/rules/setup/base.js");
 
-
 /* *** RULES *** */
 // Displays the set match rules at the beginning of the match, for those who did not pay attention to the settings in the lobby
 include("multiplay/script/rules/printsettings.js");
@@ -36,10 +35,8 @@ include("multiplay/script/rules/reticule.js");
 // Logic and rules of "End conditions" of the match.
 include("multiplay/script/rules/endconditions.js");
 
-// Logic of places oil barrels on the battlefield
+// Logic of placing oil barrels on the battlefield
 include("multiplay/script/rules/oildrum.js");
-
-
 
 /* *** EVENTS *** */
 //Function to be executed when certain events occur in the game.
@@ -58,5 +55,5 @@ include("multiplay/script/rules/events/chat.js");
 
 /* *** MODS *** */
 //All mods, as well as modpacks, must start in this file.
-//At the moment, it's an empty stub doll.
+//At the moment, it's an empty stub.
 include("multiplay/script/mods/init.js");

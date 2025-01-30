@@ -82,7 +82,7 @@ const weaponStats =
 		],
 		// Extra things to research on this path, even if they don't lead to any new stuff
 		extras: [
-			"R-Wpn-MG-Damage08",
+			"R-Wpn-MG-Damage10",
 			"R-Wpn-MG-ROF03",
 		],
 	},
@@ -246,15 +246,31 @@ const weaponStats =
 			{ res: "R-Wpn-Mortar01Lt", body: "CyborgLightBody", prop: "CyborgLegs", weapons: [ "Cyb-Wpn-Grenade", ] },
 		],
 		extras: [
-			"R-Wpn-Mortar-ROF02",
+			"R-Wpn-Mortar-Damage01",
 			"R-Wpn-Mortar-Damage02",
+			"R-Wpn-Mortar-ROF01",
+			"R-Wpn-Mortar-Acc01",
+			"R-Wpn-Mortar-Acc02",
+			"R-Wpn-Mortar-ROF02",
+			"R-Wpn-Mortar-Damage03",
 			"R-Wpn-Mortar-Acc03",
-			"R-Wpn-Mortar-ROF04",
+			"R-Wpn-Mortar-Damage04",
+			"R-Wpn-Mortar-Damage05",
+			"R-Wpn-Mortar-ROF03",
 			"R-Wpn-Mortar-Damage06",
+			"R-Wpn-Mortar-ROF04",
+			"R-Wpn-Howitzer-Damage01",
+			"R-Wpn-Howitzer-ROF01",
 			"R-Wpn-Howitzer-ROF02",
+			"R-Wpn-Howitzer-Damage02",
 			"R-Wpn-Howitzer-Damage03",
+			"R-Wpn-Howitzer-Accuracy01",
+			"R-Wpn-Howitzer-Accuracy02",
 			"R-Wpn-Howitzer-Accuracy03",
+			"R-Wpn-Howitzer-ROF03",
 			"R-Wpn-Howitzer-ROF04",
+			"R-Wpn-Howitzer-Damage04",
+			"R-Wpn-Howitzer-Damage05",
 			"R-Wpn-Howitzer-Damage06",
 		],
 	},
@@ -280,10 +296,18 @@ const weaponStats =
 		],
 		templates: [],
 		extras: [
+			"R-Wpn-Howitzer-Damage01",
+			"R-Wpn-Howitzer-ROF01",
 			"R-Wpn-Howitzer-ROF02",
+			"R-Wpn-Howitzer-Damage02",
 			"R-Wpn-Howitzer-Damage03",
+			"R-Wpn-Howitzer-Accuracy01",
+			"R-Wpn-Howitzer-Accuracy02",
 			"R-Wpn-Howitzer-Accuracy03",
+			"R-Wpn-Howitzer-ROF03",
 			"R-Wpn-Howitzer-ROF04",
+			"R-Wpn-Howitzer-Damage04",
+			"R-Wpn-Howitzer-Damage05",
 			"R-Wpn-Howitzer-Damage06",
 		],
 	},
@@ -312,15 +336,31 @@ const weaponStats =
 		],
 		templates: [],
 		extras: [
-			"R-Wpn-Mortar-ROF02",
+			"R-Wpn-Mortar-Damage01",
 			"R-Wpn-Mortar-Damage02",
+			"R-Wpn-Mortar-ROF01",
+			"R-Wpn-Mortar-Acc01",
+			"R-Wpn-Mortar-Acc02",
+			"R-Wpn-Mortar-ROF02",
+			"R-Wpn-Mortar-Damage03",
 			"R-Wpn-Mortar-Acc03",
-			"R-Wpn-Mortar-ROF04",
+			"R-Wpn-Mortar-Damage04",
+			"R-Wpn-Mortar-Damage05",
+			"R-Wpn-Mortar-ROF03",
 			"R-Wpn-Mortar-Damage06",
+			"R-Wpn-Mortar-ROF04",
+			"R-Wpn-Howitzer-Damage01",
+			"R-Wpn-Howitzer-ROF01",
 			"R-Wpn-Howitzer-ROF02",
+			"R-Wpn-Howitzer-Damage02",
 			"R-Wpn-Howitzer-Damage03",
+			"R-Wpn-Howitzer-Accuracy01",
+			"R-Wpn-Howitzer-Accuracy02",
 			"R-Wpn-Howitzer-Accuracy03",
+			"R-Wpn-Howitzer-ROF03",
 			"R-Wpn-Howitzer-ROF04",
+			"R-Wpn-Howitzer-Damage04",
+			"R-Wpn-Howitzer-Damage05",
 			"R-Wpn-Howitzer-Damage06",
 			"R-Wpn-Flamer-Damage09",
 		],
@@ -403,11 +443,13 @@ const weaponStats =
 		alias: "rkta",
 		weapons: [
 			{ res: "R-Wpn-Rocket02-MRL", stat: "Rocket-MRL" }, // mra
+			{ res: "R-Wpn-Rocket02-MRLHvy", stat: "Rocket-MRL-Hvy" }, // hra
 			{ res: "R-Wpn-Rocket06-IDF", stat: "Rocket-IDF" }, // ripple
 			{ res: "R-Wpn-MdArtMissile", stat: "Missile-MdArt" }, // seraph
 			{ res: "R-Wpn-HvArtMissile", stat: "Missile-HvyArt" }, // archie
 		],
 		fastFire: [
+			{ res: "R-Wpn-Rocket02-MRLHvy", stat: "Rocket-MRL-Hvy" },
 			{ res: "R-Wpn-MdArtMissile", stat: "Missile-MdArt" },
 		],
 		vtols: [
@@ -415,6 +457,7 @@ const weaponStats =
 		],
 		defenses: [
 			{ res: "R-Defense-MRL", stat: "Emplacement-MRL-pit" }, // mra
+			{ res: "R-Defense-MRLHvy", stat: "Emplacement-MRLHvy-pit" }, // hra
 			{ res: "R-Defense-IDFRocket", stat: "Emplacement-Rocket06-IDF" }, // ripple
 			{ res: "R-Defense-MdArtMissile", stat: "Emplacement-MdART-pit" }, // seraph
 			{ res: "R-Defense-HvyArtMissile", stat: "Emplacement-HvART-pit" }, // archie
@@ -543,10 +586,10 @@ const weaponStats =
 		weapons: [],
 		vtols: [],
 		defenses: [
-		  { res: "R-Defense-Super-Cannon", stat: "X-Super-Cannon" },
-		  { res: "R-Defense-Super-Rocket", stat: "X-Super-Rocket" },
-		  { res: "R-Defense-Super-Missile", stat: "X-Super-Missile" },
-		  { res: "R-Defense-MassDriver", stat: "X-Super-MassDriver" },
+			{ res: "R-Defense-Super-Cannon", stat: "X-Super-Cannon" },
+			{ res: "R-Defense-Super-Rocket", stat: "X-Super-Rocket" },
+			{ res: "R-Defense-Super-Missile", stat: "X-Super-Missile" },
+			{ res: "R-Defense-MassDriver", stat: "X-Super-MassDriver" },
 		],
 		templates: [],
 		extras: [],
@@ -560,7 +603,7 @@ const weaponStats =
 		],
 		vtols: [],
 		defenses: [
-		    { res: "R-Defense-PlasmaCannon", stat: "Emplacement-PlasmaCannon" },
+			{ res: "R-Defense-PlasmaCannon", stat: "Emplacement-PlasmaCannon" },
 			{ res: "R-Defense-HeavyPlasmaLauncher", stat: "Emplacement-HeavyPlasmaLauncher" },
 		],
 		templates: [],
@@ -617,12 +660,8 @@ const weaponStats =
 		],
 		templates: [],
 		extras: [
-			"R-Wpn-AAGun-ROF01",
-			"R-Wpn-AAGun-Damage02",
-			"R-Wpn-AAGun-Accuracy01",
-			"R-Wpn-AAGun-Damage06",
-			"R-Wpn-AAGun-Accuracy03",
-			"R-Wpn-AAGun-ROF06", //due to how upgrades work, and because hurricane and whirlwind already has such a low firePause, the last 5 ROF upgrades are a waste of time.
+			"R-Wpn-MG-ROF03",
+			"R-Wpn-MG-Damage10",
 		],
 	},
 	nexusTech:
@@ -636,13 +675,13 @@ const weaponStats =
 		],
 		vtols: [],
 		defenses: [
-		    { res: "R-Sys-SpyTurret", stat: "Sys-SpyTower" },
-		    { res: "R-Defense-EMPCannon", stat: "WallTower-EMP" },
-		    { res: "R-Defense-EMPMortar", stat: "Emplacement-MortarEMP" },
+			{ res: "R-Sys-SpyTurret", stat: "Sys-SpyTower" },
+			{ res: "R-Defense-EMPCannon", stat: "WallTower-EMP" },
+			{ res: "R-Defense-EMPMortar", stat: "Emplacement-MortarEMP" },
 		],
 		templates: [],
 		extras: [
-		    "R-Sys-Resistance-Circuits",
+			"R-Sys-Resistance-Circuits",
 		],
 	},
 	lasers_AA:

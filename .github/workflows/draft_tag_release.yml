@@ -10,10 +10,12 @@ jobs:
   create_draft_release:
     if: startsWith(github.ref, 'refs/tags/') # sanity-check
     name: Create Draft Release
+    permissions:
+      contents: write # Needed to create draft release
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo (to obtain template files)
-        uses: actions/checkout@v2
+        uses: actions/checkout@v4
         with:
           persist-credentials: false
           fetch-depth: 1
@@ -33,15 +35,15 @@ jobs:
           SOURCE_TAG_QUALIFIER="${BASH_REMATCH[2]:1}"
           echo "SOURCE_TAG_VERSION=\"${SOURCE_TAG_VERSION}\""
           echo "SOURCE_TAG_QUALIFIER=\"${SOURCE_TAG_QUALIFIER}\""
-          
+
           if [ ! -z "${SOURCE_TAG_QUALIFIER}" ]; then
             SOURCE_TAG_IS_PRERELEASE="true"
           else
             SOURCE_TAG_IS_PRERELEASE="false"
           fi
-          
-          echo "::set-output name=SOURCE_TAG::${SOURCE_TAG}"
-          echo "::set-output name=SOURCE_TAG_IS_PRERELEASE::${SOURCE_TAG_IS_PRERELEASE}"
+
+          echo "SOURCE_TAG=${SOURCE_TAG}" >> $GITHUB_OUTPUT
+          echo "SOURCE_TAG_IS_PRERELEASE=${SOURCE_TAG_IS_PRERELEASE}" >> $GITHUB_OUTPUT
       - name: Create Draft Release
         run: |
           ADDITIONAL_GH_OPTIONS=""

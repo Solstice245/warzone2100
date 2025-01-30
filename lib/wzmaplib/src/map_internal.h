@@ -23,8 +23,16 @@
 #include "../include/wzmaplib/map_debug.h"
 #include <cstdarg>
 #include <cstdio>
+#include <string>
+#include <vector>
+
+#include <nonstd/optional.hpp>
+using nonstd::optional;
+using nonstd::nullopt;
 
 namespace WzMap {
+
+class IOProvider;
 
 #if defined __GNUC__ && defined __GNUC_MINOR__
 #  define MAPLIB_CC_GNU_PREREQ(maj, min) \
@@ -56,6 +64,16 @@ static inline int vssprintf(char (&dest)[N], char const *format, va_list params)
 void _printLog(WzMap::LoggingProtocol* logger, int line, WzMap::LoggingProtocol::LogLevel level, const char *function, const char *str, ...) MAPLIB_DECL_FORMAT(__MINGW_PRINTF_FORMAT, 5, 6);
 #else
 void _printLog(WzMap::LoggingProtocol* logger, int line, WzMap::LoggingProtocol::LogLevel level, const char *function, const char *str, ...) MAPLIB_DECL_FORMAT(printf, 5, 6);
+#endif
+
+static inline bool strEndsWith(const std::string &str, const std::string &suffix)
+{
+	return (str.size() >= suffix.size()) && (str.compare(str.size() - suffix.size(), suffix.size(), suffix) == 0);
+}
+
+#if defined(_WIN32)
+bool win_utf8ToUtf16(const char* str, std::vector<wchar_t>& outputWStr);
+bool win_utf16toUtf8(const wchar_t* buffer, std::vector<char>& u8_buffer);
 #endif
 
 } // namespace WzMap

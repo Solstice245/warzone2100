@@ -35,6 +35,7 @@
 #include "multiplay.h"
 #include "qtscript.h"
 #include "template.h"
+#include "difficulty.h"
 #include "activity.h"
 
 struct CHEAT_ENTRY
@@ -68,9 +69,11 @@ static CHEAT_ENTRY cheatCodes[] =
 	{"john kettley", kf_ToggleWeather},	//john kettley
 	{"mouseflip", kf_ToggleMouseInvert},	//mouseflip
 	{"biffer baker", kf_BifferBaker},	// almost invincible units
-	{"easy", kf_SetEasyLevel},	//easy
-	{"normal", kf_SetNormalLevel},	//normal
-	{"hard", kf_SetHardLevel},	//hard
+	{"supereasy", []{ kf_SetDifficultyLevel(DL_SUPER_EASY); }}, //supereasy
+	{"easy", []{ kf_SetDifficultyLevel(DL_EASY); }}, //easy
+	{"normal", []{ kf_SetDifficultyLevel(DL_NORMAL); }}, //normal
+	{"hard", []{ kf_SetDifficultyLevel(DL_HARD); }}, //hard
+	{"insane", []{ kf_SetDifficultyLevel(DL_INSANE); }}, //insane
 	{"double up", kf_DoubleUp},	// your units take half the damage
 	{"whale fin", kf_TogglePower},	// turns on/off infinte power
 	{"get off my land", kf_KillEnemy},	// kills all enemy units and structures
@@ -90,6 +93,7 @@ static CHEAT_ENTRY cheatCodes[] =
 	{"autogame on", kf_AutoGame},
 	{"autogame off", kf_AutoGame},
 	{"shakey", kf_ToggleShakeStatus}, //shakey
+	{"list droids", kf_ListDroids},
 
 };
 
@@ -112,6 +116,12 @@ bool _attemptCheatCode(const char *cheat_name)
 	if (!strcasecmp("specstats", cheat_name))
 	{
 		kf_ToggleSpecOverlays();
+		return true;
+	}
+
+	if (!strcasecmp("help", cheat_name))
+	{
+		intShowWidgetHelp();
 		return true;
 	}
 
@@ -181,6 +191,11 @@ void sendProcessDebugMappings(bool val)
 	NETend();
 }
 
+#if !defined(__clang__) && defined(__GNUC__) && (12 <= __GNUC__)
+# pragma GCC diagnostic push
+# pragma GCC diagnostic ignored "-Warray-bounds"
+#endif
+
 static std::string getWantedDebugMappingStatuses(const DebugInputManager& dbgInputManager, bool bStatus)
 {
 	char ret[MAX_PLAYERS + 1] = "\0";
@@ -196,6 +211,10 @@ static std::string getWantedDebugMappingStatuses(const DebugInputManager& dbgInp
 	*p++ = '\0';
 	return ret;
 }
+
+#if !defined(__clang__) && defined(__GNUC__) && (12 <= __GNUC__)
+# pragma GCC diagnostic pop
+#endif
 
 void recvProcessDebugMappings(NETQUEUE queue)
 {

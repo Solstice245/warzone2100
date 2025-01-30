@@ -3,7 +3,7 @@ function setupScavenger()	// inside hackNetOff()
 	// Returns true if something is defined
 	function isDefined(data)
 	{
-		return typeof(data) !== "undefined";
+		return typeof data !== "undefined";
 	}
 
 	const derrick = "A0ResourceExtractor";
@@ -43,6 +43,19 @@ function setupScavenger()	// inside hackNetOff()
 		["B3bodyRKbuggy01","BabaRocket"],
 		["B2RKJeepBody","BabaRocket"],
 		["B2RKJeepBody","BabaRocket"],
+		["B4body-sml-trike01-Ultimate","bTrikeMG"],
+		["B4body-sml-trike01-Ultimate","bTrikeMG"],
+		["B4body-sml-trike01-Ultimate","bTrikeMG"],
+		["B4body-sml-trike01-Ultimate","bTrikeMG"],
+		["B3body-sml-buggy01-Ultimate","BuggyMG"],
+		["B3body-sml-buggy01-Ultimate","BuggyMG"],
+		["B2JeepBody-Ultimate","BJeepMG"],
+		["B2JeepBody-Ultimate","BJeepMG"],
+		["B2JeepBody-Ultimate","BJeepMG"],
+		["B3bodyRKbuggy01-Ultimate","BabaRocket"],
+		["B3bodyRKbuggy01-Ultimate","BabaRocket"],
+		["B2RKJeepBody-Ultimate","BabaRocket"],
+		["B2RKJeepBody-Ultimate","BabaRocket"],
 		["BusBody","BusCannon"],
 		["BusBody","BusCannon"],
 		["BusBody","BabaPitRocketAT"],
@@ -70,7 +83,7 @@ function setupScavenger()	// inside hackNetOff()
 		["HeavyChopper", "Rocket-VTOL-Pod-SCAVS"],
 	];
 
-	for (var i = 0, len = templates.length; i < len; ++i)
+	for (let i = 0, len = templates.length; i < len; ++i)
 	{
 		makeComponentAvailable(templates[i][0], scavengerPlayer);
 		makeComponentAvailable(templates[i][1], scavengerPlayer);
@@ -86,7 +99,7 @@ function setupScavenger()	// inside hackNetOff()
 		}
 	}
 
-	for (var i = 0, len = vtolTemplates.length; i < len; ++i)
+	for (let i = 0, len = vtolTemplates.length; i < len; ++i)
 	{
 
 		makeComponentAvailable(vtolTemplates[i][0], scavengerPlayer);
@@ -144,9 +157,14 @@ function setupScavenger()	// inside hackNetOff()
 		"BabaRocket",
 		"BTowerMG",
 		"Mortar1Mk1",
+		"B4body-sml-trike01-Ultimate",
+		"B3body-sml-buggy01-Ultimate",
+		"B2JeepBody-Ultimate",
+		"B3bodyRKbuggy01-Ultimate",
+		"B2RKJeepBody-Ultimate",
 	];
 
-	for (var i = 0, len = SCAV_COMPONENTS.length; i < len; ++i)
+	for (let i = 0, len = SCAV_COMPONENTS.length; i < len; ++i)
 	{
 		makeComponentAvailable(SCAV_COMPONENTS[i], scavengerPlayer);
 	}
@@ -158,7 +176,7 @@ function setupScavenger()	// inside hackNetOff()
 	enableStructure(repair, scavengerPlayer);
 	enableStructure(vtolpad, scavengerPlayer);
 
-	for (var i = 0, len = defenses.length; i < len; ++i)
+	for (let i = 0, len = defenses.length; i < len; ++i)
 	{
 		enableStructure(defenses[i], scavengerPlayer);
 	}

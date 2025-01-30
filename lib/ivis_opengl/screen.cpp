@@ -25,7 +25,6 @@
  */
 
 #include "lib/framework/frame.h"
-#include "lib/framework/opengl.h"
 #include "lib/framework/wztime.h"
 #include "lib/exceptionhandler/dumpinfo.h"
 #include "lib/ivis_opengl/png_util.h"
@@ -40,6 +39,7 @@
 #include "lib/framework/physfs_ext.h"
 
 #include "screen.h"
+#include "bitimage.h"
 #include "src/console.h"
 #include "src/levels.h"
 #include "lib/framework/wzapp.h"
@@ -59,7 +59,7 @@
 #include <glm/gtx/transform.hpp>
 
 /* global used to indicate preferred internal OpenGL format */
-bool wz_texture_compression = 0;
+bool wz_texture_compression = true;
 
 static bool		bBackDrop = false;
 static char		screendump_filename[PATH_MAX];
@@ -80,6 +80,8 @@ static int preview_width = 0, preview_height = 0;
 static Vector2i player_pos[MAX_PLAYERS];
 static WzText player_Text[MAX_PLAYERS];
 static bool mappreview = false;
+
+static void screen_GenerateCoordinatesAndVBOs();
 
 /* Initialise the double buffered display */
 bool screenInitialise()
@@ -237,6 +239,8 @@ void screenShutDown()
 	{
 		player_Text[i] = WzText();
 	}
+
+	iV_ImageFileShutdown();
 }
 
 /// Display a random backdrop from files in dirname starting with basename.
@@ -279,8 +283,10 @@ void screen_SetRandomBackdrop(const char *dirname, const char *basename)
 void screen_SetBackDropFromFile(const char *filename)
 {
 	int maxTextureSize = gfx_api::context::get().get_context_value(gfx_api::context::context_value::MAX_TEXTURE_SIZE);
-	backdropGfx->loadTexture(filename, maxTextureSize, maxTextureSize);
-	screen_Upload(nullptr);
+	backdropGfx->loadTexture(filename, gfx_api::texture_type::user_interface, maxTextureSize, maxTextureSize);
+	backdropIsMapPreview = false;
+	// Generate coordinates and put them into VBOs
+	screen_GenerateCoordinatesAndVBOs();
 }
 
 void screen_StopBackDrop()
@@ -288,9 +294,11 @@ void screen_StopBackDrop()
 	bBackDrop = false;	//checking [movie]
 }
 
-void screen_RestartBackDrop()
+bool screen_RestartBackDrop()
 {
+	bool changedValue = !bBackDrop;
 	bBackDrop = true;
+	return changedValue;
 }
 
 bool screen_GetBackDrop()
@@ -313,12 +321,12 @@ void screen_Display()
 		int scale = MIN(s1, s2);
 		int w = preview_width * scale;
 		int h = preview_height * scale;
+		WzString text;
 
 		for (int i = 0; i < MAX_PLAYERS; i++)
 		{
 			int x = player_pos[i].x;
 			int y = player_pos[i].y;
-			char text[5];
 
 			if (x == 0x77777777)
 			{
@@ -327,7 +335,7 @@ void screen_Display()
 
 			x = screenWidth / 2 - w / 2 + x * scale;
 			y = screenHeight / 2 - h / 2 + y * scale;
-			ssprintf(text, "%d", i);
+			text = WzString::number(i);
 			player_Text[i].setText(text, font_large);
 			player_Text[i].render(x - 1, y - 1, WZCOL_BLACK);
 			player_Text[i].render(x + 1, y - 1, WZCOL_BLACK);
@@ -341,7 +349,7 @@ void screen_Display()
 //******************************************************************
 //slight hack to display maps (or whatever) in background.
 //bitmap MUST be (BACKDROP_HACK_WIDTH * BACKDROP_HACK_HEIGHT) for now.
-void screen_GenerateCoordinatesAndVBOs()
+static void screen_GenerateCoordinatesAndVBOs()
 {
 	assert(backdropGfx != nullptr);
 
@@ -386,17 +394,12 @@ void screen_GenerateCoordinatesAndVBOs()
 	backdropGfx->buffers(4, vertices, texcoords);
 }
 
-void screen_Upload(const char *newBackDropBmp)
+void screen_Upload(iV_Image&& newBackdropImage)
 {
-	backdropIsMapPreview = false;
-
-	if (newBackDropBmp) // preview
-	{
-		// Slight hack to display maps previews in background.
-		// Bitmap MUST be (BACKDROP_HACK_WIDTH * BACKDROP_HACK_HEIGHT) for now.
-		backdropGfx->makeTexture(BACKDROP_HACK_WIDTH, BACKDROP_HACK_HEIGHT, gfx_api::pixel_format::FORMAT_RGB8_UNORM_PACK8, newBackDropBmp);
-		backdropIsMapPreview = true;
-	}
+	// Slight hack to display maps previews in background.
+	// Bitmap MUST be (BACKDROP_HACK_WIDTH * BACKDROP_HACK_HEIGHT) for now.
+	backdropGfx->loadTexture(std::move(newBackdropImage), gfx_api::texture_type::user_interface, "mem::generated_map_preview");
+	backdropIsMapPreview = true;
 
 	// Generate coordinates and put them into VBOs
 	screen_GenerateCoordinatesAndVBOs();
@@ -526,9 +529,9 @@ void screenDoDumpToDiskIfRequired()
 				std::move(image),
 				[](const ScreenshotSaveRequest& request)
 				{
-					if (request.image->bmp)
+					if (request.image)
 					{
-						free(request.image->bmp);
+						request.image->clear();
 					}
 				}
 			);
@@ -583,7 +586,8 @@ void screen_FlipIfBackDropTransition()
 	static auto hadBackDrop = false;
 	if (hadBackDrop != screen_GetBackDrop())
 	{
-		pie_ScreenFlip(CLEAR_BLACK);
+		pie_ScreenFrameRenderEnd();
+		pie_ScreenFrameRenderBegin();
 		hadBackDrop = screen_GetBackDrop();
 	}
 }

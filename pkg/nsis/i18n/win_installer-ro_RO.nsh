@@ -8,6 +8,8 @@ ${LangFileString} WZ_64BIT_AVAILABLE "Există o versiune de 64 biți a Warzone 2
 
 ${LangFileString} WZ_64BIT_INSTALL_32BIT_AVAILABLE "Aceasta este versiunea de 64 biți a Warzone 2100.$\r$\nTe rugăm să descarci versiunea de 32 biți de pe https://wz2100. et/ $\r$\nApăsați OK pentru a ieși din Instalare."
 
+${LangFileString} WZ_ARM64_INSTALL_NON_ARM64 "Aceasta este versiunea ARM64 a Warzone 2100, și acest dispozitiv nu are un procesor ARM64. $\r$\nVă rugăm vizitați https://wz2100. net/ ca să descărcați versiunea potrivită pentru sistemul dumneavoastră (exemplu: x64).$\r$\nContinuă instalarea ARM64 oricum?"
+
 ${LangFileString} WZ_GPL_NEXT "Înainte"
 
 ${LangFileString} TEXT_SecBase "Fişierele de bază"

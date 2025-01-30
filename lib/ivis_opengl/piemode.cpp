@@ -27,7 +27,6 @@
 /***************************************************************************/
 
 #include "lib/framework/frame.h"
-#include "lib/framework/opengl.h"
 #include "lib/framework/wzapp.h"
 
 #include "lib/ivis_opengl/piedef.h"
@@ -66,7 +65,7 @@ bool pie_Initialise()
 	pie_TexInit();
 
 	/* Find texture compression extension */
-	if (GLAD_GL_ARB_texture_compression && wz_texture_compression)
+	if (wz_texture_compression)
 	{
 		debug(LOG_TEXTURE, "Texture compression: Yes");
 	}
@@ -80,6 +79,8 @@ bool pie_Initialise()
 	pie_SetDefaultStates();
 	debug(LOG_3D, "xcentre %d; ycentre %d", rendSurface.xcentre, rendSurface.ycentre);
 
+	pie_InitializeInstancedRenderer();
+
 	return true;
 }
 
@@ -91,16 +92,34 @@ void pie_ShutDown()
 
 /***************************************************************************/
 
-void pie_ScreenFlip(int clearMode)
-{
-	screenDoDumpToDiskIfRequired();
-	gfx_api::context::get().flip(clearMode);
-	wzPerfFrame();
+static bool renderingFrame = true; // starts off true
 
+void pie_ScreenFrameRenderBegin()
+{
+	if (renderingFrame)
+	{
+		debug(LOG_WZ, "Call to pie_ScreenFrameRenderBegin when previous frame render hasn't ended yet");
+		return;
+	}
+	renderingFrame = true;
+	gfx_api::context::get().beginRenderPass();
 	if (screen_GetBackDrop())
 	{
 		screen_Display();
 	}
+}
+
+void pie_ScreenFrameRenderEnd()
+{
+	if (!renderingFrame)
+	{
+		debug(LOG_WZ, "Call to pie_ScreenFrameRenderEnd without matching pie_ScreenFrameRenderBegin");
+		return;
+	}
+	renderingFrame = false;
+	screenDoDumpToDiskIfRequired();
+	gfx_api::context::get().endRenderPass();
+	wzPerfFrame();
 }
 
 /***************************************************************************/

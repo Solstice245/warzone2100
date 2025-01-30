@@ -13,11 +13,21 @@ RUN apt-get -u update \
 
 # Install Vulkan SDK
 ADD https://packages.lunarg.com/lunarg-signing-key-pub.asc /tmp
-ADD https://packages.lunarg.com/vulkan/1.2.182/lunarg-vulkan-1.2.182-focal.list /etc/apt/sources.list.d
+ADD https://packages.lunarg.com/vulkan/1.3.268/lunarg-vulkan-1.3.268-focal.list /etc/apt/sources.list.d
 RUN apt-key add /tmp/lunarg-signing-key-pub.asc
 RUN apt-get -u update \
  && DEBIAN_FRONTEND=noninteractive apt-get -y install vulkan-sdk \
  && rm -rf /var/lib/apt/lists/*
+
+# Defines arguments which can be passed during build time.
+ARG USER=warzone2100
+ARG UID=1000
+# Create a user with given UID.
+RUN useradd -d /home/warzone2100 -m -g root -u "$UID" "$USER"
+# Switch to warzone2100 user by default.
+USER warzone2100
+# Check the current uid of the user.
+RUN id
 
 WORKDIR /code
 CMD ["sh"]

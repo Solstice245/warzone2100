@@ -17,7 +17,7 @@
 	Foundation, Inc., 51 Franklin St, Fifth Floor, Boston, MA 02110-1301 USA
 */
 
-#include <3rdparty/json/json.hpp> // Must come before WZ includes
+#include <nlohmann/json.hpp> // Must come before WZ includes
 
 #include "wzcrashhandlingproviders.h"
 
@@ -32,6 +32,9 @@
 #include "urlhelpers.h"
 #include "activity.h"
 #include "modding.h"
+
+#include <chrono>
+#include <thread>
 
 /* Crash-handling providers */
 
@@ -53,7 +56,7 @@ const size_t tagKeyMaxLength = 32;
 const size_t tagValueMaxLength = 200;
 
 #if defined(WZ_CRASHHANDLING_PROVIDER_SENTRY)
-static bool initCrashHandlingProvider_Sentry(const std::string& platformPrefDir_Input, const std::string& defaultLogFilePath)
+static bool initCrashHandlingProvider_Sentry(const std::string& platformPrefDir_Input, const std::string& defaultLogFilePath, bool debugCrashHandler)
 {
 	ASSERT_OR_RETURN(false, !platformPrefDir_Input.empty(), "platformPrefDir must not be empty");
 	ASSERT_OR_RETURN(false, !defaultLogFilePath.empty(), "defaultLogFilePath must not be empty");
@@ -72,6 +75,12 @@ static bool initCrashHandlingProvider_Sentry(const std::string& platformPrefDir_
 	sentry_options_set_dsn(options, WZ_CRASHHANDLING_PROVIDER_SENTRY_DSN);
 	sentry_options_set_release(options, releaseString.c_str());
 	sentry_options_set_environment(options, environmentString.c_str());
+#ifdef DEBUG
+	if (debugCrashHandler)
+	{
+		sentry_options_set_debug(options, 1);
+	}
+#endif
 	// for the temp path, always use a subdirectory of the default platform pref dir
 	// Make sure that we have a directory separator at the end of the string
 	std::string platformPrefDir = platformPrefDir_Input;
@@ -356,18 +365,24 @@ public:
 		}
 		crashHandlingProviderSetContext_Sentry("wz.mods", modsInfo);
 	}
+
+	// game exit
+	virtual void gameExiting() override
+	{
+		gameStateChange("/shutdown");
+	}
 };
 
 #endif // defined(WZ_CRASHHANDLING_PROVIDER_SENTRY)
 
-bool initCrashHandlingProvider(const std::string& platformPrefDir, const std::string& defaultLogFilePath)
+bool initCrashHandlingProvider(const std::string& platformPrefDir, const std::string& defaultLogFilePath, bool debugCrashHandler)
 {
 #if !defined(WZ_CRASHHANDLING_PROVIDER)
 	return false;
 #elif defined(WZ_CRASHHANDLING_PROVIDER_SENTRY)
 	// Sentry crash-handling provider
 	ASSERT_OR_RETURN(true, !enabledSentryProvider, "Called more than once");
-	enabledSentryProvider = initCrashHandlingProvider_Sentry(platformPrefDir, defaultLogFilePath);
+	enabledSentryProvider = initCrashHandlingProvider_Sentry(platformPrefDir, defaultLogFilePath, debugCrashHandler);
 	if (enabledSentryProvider)
 	{
 		ActivityManager::instance().addActivitySink(std::make_shared<SentryCrashHandlerActivitySink>());
@@ -425,23 +440,105 @@ bool crashHandlingProviderSetContext(const std::string& key, const nlohmann::jso
 #endif
 }
 
-bool useCrashHandlingProvider(int argc, const char * const *argv)
+bool crashHandlingProviderCaptureException(const char* type, const char* value, const std::string& description, bool captureStackTrace, bool handled, const nlohmann::json *additionalData)
+{
+#if !defined(WZ_CRASHHANDLING_PROVIDER)
+	return false;
+#elif defined(WZ_CRASHHANDLING_PROVIDER_SENTRY)
+	// Sentry crash-handling provider
+	if (!enabledSentryProvider) { return false; }
+
+	sentry_value_t event = sentry_value_new_event();
+	sentry_value_t exc = sentry_value_new_exception(type, value);
+	if (captureStackTrace)
+	{
+		sentry_value_set_stacktrace(exc, NULL, 0);
+	}
+	sentry_value_t mechanism = sentry_value_new_object();
+	sentry_value_set_by_key(mechanism, "type", sentry_value_new_string("generic"));
+	if (!description.empty())
+	{
+		sentry_value_set_by_key(mechanism, "description", sentry_value_new_string_n(description.c_str(), description.size()));
+	}
+	sentry_value_set_by_key(mechanism, "handled", sentry_value_new_bool(handled));
+	if (additionalData != nullptr)
+	{
+		sentry_value_t additionalDataVal = mapJsonObjectToSentryValue(*additionalData);
+		if (sentry_value_get_type(additionalDataVal) == SENTRY_VALUE_TYPE_OBJECT)
+		{
+			sentry_value_set_by_key(mechanism, "data", additionalDataVal);
+		}
+		else
+		{
+			sentry_value_decref(additionalDataVal);
+		}
+	}
+	sentry_value_set_by_key(exc, "mechanism", mechanism);
+
+	sentry_event_add_exception(event, exc);
+	auto event_id = sentry_capture_event(event);
+	return !sentry_uuid_is_nil(&event_id);
+#else
+	// Not available for crash handling provider
+	return false;
+#endif
+}
+
+bool useCrashHandlingProvider(int argc, const char * const *argv, bool& out_debugCrashHandler)
 {
 #if !defined(WZ_CRASHHANDLING_PROVIDER)
 	return false; // use native crash-handling exception handler
 #else
 	// if compiled with a crash-handling provider, search for "--wz-crash-rpt"
+	bool useProvider = true;
 	if (argv)
 	{
 		for (int i = 0; i < argc; ++i)
 		{
 			if (argv[i] && !strcasecmp(argv[i], "--wz-crash-rpt"))
 			{
-				return false;
+				useProvider = false;
 			}
+#if defined(DEBUG)
+			else if (argv[i] && !strcasecmp(argv[i], "--wz-debug-crash-handler"))
+			{
+				out_debugCrashHandler = true;
+			}
+#endif
 		}
 	}
-	return true;
+	return useProvider;
 #endif
 }
 
+bool crashHandlingProviderTestCrash()
+{
+#if !defined(WZ_CRASHHANDLING_PROVIDER)
+	return false; // caller should handle its own way
+#elif defined(WZ_CRASHHANDLING_PROVIDER_SENTRY)
+	// Sentry crash-handling provider
+	if (!enabledSentryProvider) { return false; }
+	// test reporting exceptions
+	crashHandlingProviderCaptureException(__FUNCTION__, "testexception", "Test crash initiated", false, true);
+	std::this_thread::sleep_for(std::chrono::seconds(5)); // (hopefully enough time for the exception to be sent in the background...)
+	// trigger an actual crash
+# if defined(WZ_OS_WIN)
+	RaiseException(0xE000DEAD, EXCEPTION_NONCONTINUABLE, 0, 0);
+	return false;
+# else
+#  if defined(WZ_CC_GNU) && !defined(WZ_CC_INTEL) && !defined(WZ_CC_CLANG) && (7 <= __GNUC__)
+#   pragma GCC diagnostic push
+#   pragma GCC diagnostic ignored "-Wstringop-overflow"
+#endif
+	static void *invalid_mem = (void *)1;
+	memset((char *)invalid_mem, 1, 100);
+#  if defined(WZ_CC_GNU) && !defined(WZ_CC_INTEL) && !defined(WZ_CC_CLANG) && (7 <= __GNUC__)
+#   pragma GCC diagnostic pop
+#  endif
+	return false;
+# endif
+#else
+	// No available method for this crash handling provider?
+	return false;
+#endif
+}

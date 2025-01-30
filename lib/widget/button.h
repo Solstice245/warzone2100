@@ -40,12 +40,12 @@ public:
 	struct Images
 	{
 		Images() {}
-		Images(Image normal, Image down, Image highlighted, Image disabled = Image()) : normal(normal), down(down), highlighted(highlighted), disabled(disabled) {}
+		Images(AtlasImage normal, AtlasImage down, AtlasImage highlighted, AtlasImage disabled = AtlasImage()) : normal(normal), down(down), highlighted(highlighted), disabled(disabled) {}
 
-		Image normal;       ///< The image for the button.
-		Image down;         ///< The image for the button, when down. Is overlaid over image.
-		Image highlighted;  ///< The image for the button, when highlighted. Is overlaid over image.
-		Image disabled;     ///< The image for the button, when disabled. Is overlaid over image.
+		AtlasImage normal;       ///< The image for the button.
+		AtlasImage down;         ///< The image for the button, when down. Is overlaid over image.
+		AtlasImage highlighted;  ///< The image for the button, when highlighted. Is overlaid over image.
+		AtlasImage disabled;     ///< The image for the button, when disabled. Is overlaid over image.
 	};
 
 public:
@@ -53,22 +53,25 @@ public:
 	W_BUTTON();
 
 	void clicked(W_CONTEXT *psContext, WIDGET_KEY key) override;
+	virtual bool clickHeld(W_CONTEXT *psContext, WIDGET_KEY key);
 	void released(W_CONTEXT *psContext, WIDGET_KEY key) override;
 	void highlight(W_CONTEXT *psContext) override;
 	void highlightLost() override;
+	void run(W_CONTEXT *psContext) override;
 	void display(int xOffset, int yOffset) override;
 	void displayRecursive(WidgetGraphicsContext const &context) override; // for handling progress border overlay
 
-	unsigned getState() override;
+	unsigned getState() const override;
 	void setState(unsigned state) override;
 	void setFlash(bool enable) override;
 	WzString getString() const override;
 	void setString(WzString string) override;
 	void setTip(std::string string) override;
+	void setHelp(optional<WidgetHelp> help) override;
 	void unlock();
 
 	void setImages(Images const &images);
-	void setImages(Image image, Image imageDown, Image imageHighlight, Image imageDisabled = Image());
+	void setImages(AtlasImage image, AtlasImage imageDown, AtlasImage imageHighlight, AtlasImage imageDisabled = AtlasImage());
 
 	using WIDGET::setString;
 	using WIDGET::setTip;
@@ -76,6 +79,11 @@ public:
 	std::string getTip() override
 	{
 		return pTip;
+	}
+	WidgetHelp const * getHelp() const override
+	{
+		if (!help.has_value()) { return nullptr; }
+		return &(help.value());
 	}
 
 	/* The optional "onClick" callback function */
@@ -153,6 +161,9 @@ private:
 	optional<ProgressBorder> progressBorder;
 	PIELIGHT				 progressBorderColour;
 	WIDGET_KEY				 lastClickButton = WKEY_NONE;
+	optional<WidgetHelp>	help;
+	optional<std::chrono::steady_clock::time_point> clickDownStart; // the start time of click down on this button
+	optional<WIDGET_KEY> clickDownKey;
 };
 
 class MultipleChoiceButton : public W_BUTTON

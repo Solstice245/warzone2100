@@ -72,7 +72,7 @@ struct CONSOLE_MESSAGE
 	CONSOLE_TEXT_JUSTIFICATION JustifyType;	// text justification
 	int		player;			// Player who sent this message or SYSTEM_MESSAGE
 	CONSOLE_MESSAGE(const std::string &text, iV_fonts fontID, UDWORD time, UDWORD duration, CONSOLE_TEXT_JUSTIFICATION justify, int plr)
-	                : display(text, fontID), timeAdded(time), duration(duration), JustifyType(justify), player(plr) {}
+	                : display(WzString::fromUtf8(text), fontID), timeAdded(time), duration(duration), JustifyType(justify), player(plr) {}
 
 	CONSOLE_MESSAGE& operator =(CONSOLE_MESSAGE&& input) noexcept
 	{
@@ -338,7 +338,7 @@ void	flushConsoleMessages()
 }
 
 /** Sets console text color depending on message type */
-static PIELIGHT getConsoleTextColor(int player)
+PIELIGHT getConsoleTextColor(int player)
 {
 	// System messages
 	if (player == SYSTEM_MESSAGE)

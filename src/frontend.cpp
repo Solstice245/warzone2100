@@ -41,6 +41,8 @@
 #include "lib/widget/gridlayout.h"
 #include "lib/widget/margin.h"
 #include "lib/widget/alignment.h"
+#include "lib/widget/image.h"
+#include "lib/widget/resize.h"
 
 #include <limits>
 
@@ -74,11 +76,20 @@
 #include "warzoneconfig.h"
 #include "wrappers.h"
 #include "titleui/titleui.h"
+#include "titleui/campaign.h"
 #include "urlhelpers.h"
 #include "game.h"
-#include "map.h" //for builtInMap
+#include "map.h" //for builtInMap and useTerrainOverrides
 #include "notifications.h"
 #include "activity.h"
+#include "clparse.h" // for autorating
+#include "hci/groups.h"
+
+#include <fmt/core.h>
+
+#if defined(__EMSCRIPTEN__)
+# include "emscripten_helpers.h"
+#endif
 
 // ////////////////////////////////////////////////////////////////////////////
 // Global variables
@@ -87,14 +98,15 @@ char			aLevelName[MAX_LEVEL_NAME_SIZE + 1];	//256];			// vital! the wrf file to 
 
 bool			bLimiterLoaded = false;
 
+static std::shared_ptr<IMAGEFILE> pFlagsImages;
+
 #define TUTORIAL_LEVEL "TUTORIAL3"
 #define TRANSLATION_URL "https://translate.wz2100.net"
 
 // ////////////////////////////////////////////////////////////////////////////
 // Forward definitions
 
-static W_BUTTON * addSmallTextButton(UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt, unsigned int style);
-static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &txt, unsigned int style);
+static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &txt, unsigned int style, optional<unsigned int> minimumWidth = nullopt);
 static std::shared_ptr<W_SLIDER> makeFESlider(UDWORD id, UDWORD parent, UDWORD stops, UDWORD pos);
 static std::shared_ptr<WIDGET> addMargin(std::shared_ptr<WIDGET> widget);
 
@@ -168,9 +180,10 @@ static void runchatlink()
 	openURLInBrowser("https://wz2100.net/webchat/");
 }
 
-static void notifyAboutMissingVideos()
+const char * VIDEO_TAG = "videoMissing";
+
+void notifyAboutMissingVideos()
 {
-	const std::string VIDEO_TAG = "videoMissing";
 	if (!hasNotificationsWithTag(VIDEO_TAG))
 	{
 		WZ_Notification notification;
@@ -188,6 +201,11 @@ static void notifyAboutMissingVideos()
 	}
 }
 
+static void closeMissingVideosNotification()
+{
+	cancelOrDismissNotificationsWithTag(VIDEO_TAG);
+}
+
 void startTitleMenu()
 {
 	intRemoveReticule();
@@ -202,7 +220,7 @@ void startTitleMenu()
 	addTextButton(FRONTEND_OPTIONS, FRONTEND_POS5X, FRONTEND_POS5Y, _("Options"), WBUT_TXTCENTRE);
 
 	// check whether video sequences are installed
-	if (PHYSFS_exists("sequences/devastation.ogg"))
+	if (seq_hasVideos())
 	{
 		addTextButton(FRONTEND_PLAYINTRO, FRONTEND_POS6X, FRONTEND_POS6Y, _("View Intro"), WBUT_TXTCENTRE);
 	}
@@ -242,7 +260,6 @@ void runContinue()
 	SPinit(lastSaveMP ? LEVEL_TYPE::SKIRMISH : LEVEL_TYPE::CAMPAIGN);
 	sstrcpy(saveGameName, lastSavePath.toPath(SaveGamePath_t::Extension::GAM).c_str());
 	bMultiPlayer = lastSaveMP;
-	setCampaignNumber(getCampaign(saveGameName));
 }
 
 bool runTitleMenu()
@@ -257,6 +274,9 @@ bool runTitleMenu()
 		break;
 	case FRONTEND_MULTIPLAYER:
 		changeTitleMode(MULTI);
+#if defined(__EMSCRIPTEN__)
+		wzDisplayDialog(Dialog_Information, "Multiplayer requires the native version.", "The web version of Warzone 2100 does not support online multiplayer. Please visit https://wz2100.net to download the native version for your platform.");
+#endif
 		break;
 	case FRONTEND_SINGLEPLAYER:
 		changeTitleMode(SINGLE);
@@ -323,6 +343,7 @@ bool runTutorialMenu()
 	case FRONTEND_TUTORIAL:
 		SPinit(LEVEL_TYPE::CAMPAIGN);
 		sstrcpy(aLevelName, TUTORIAL_LEVEL);
+		setGroupButtonEnabled(false); // hack to disable the groups UI for the tutorial
 		changeTitleMode(STARTGAME);
 		break;
 
@@ -371,74 +392,10 @@ void startSinglePlayerMenu()
 	addSideText(FRONTEND_SIDETEXT, FRONTEND_SIDEX, FRONTEND_SIDEY, _("SINGLE PLAYER"));
 	addMultiBut(psWScreen, FRONTEND_BOTFORM, FRONTEND_QUIT, 10, 10, 30, 29, P_("menu", "Return"), IMAGE_RETURN, IMAGE_RETURN_HI, IMAGE_RETURN_HI);
 	// show this only when the video sequences are not installed
-	if (!PHYSFS_exists("sequences/devastation.ogg"))
+	if (!seq_hasVideos())
 	{
 		addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("Campaign videos are missing! Get them from http://wz2100.net"), 0);
-		notifyAboutMissingVideos();
 	}
-}
-
-void startCampaignSelector()
-{
-	addBackdrop();
-	addTopForm(false);
-	addBottomForm();
-
-	std::vector<CAMPAIGN_FILE> list = readCampaignFiles();
-	ASSERT(list.size() <= static_cast<size_t>(std::numeric_limits<UDWORD>::max()), "list.size() (%zu) exceeds UDWORD max", list.size());
-	for (UDWORD i = 0; i < static_cast<UDWORD>(list.size()); i++)
-	{
-		addTextButton(FRONTEND_CAMPAIGN_1 + i, FRONTEND_POS1X, FRONTEND_POS2Y + FRONTEND_BUTHEIGHT * i, gettext(list[i].name.toUtf8().c_str()), WBUT_TXTCENTRE);
-	}
-	addSideText(FRONTEND_SIDETEXT, FRONTEND_SIDEX, FRONTEND_SIDEY, _("CAMPAIGNS"));
-	addMultiBut(psWScreen, FRONTEND_BOTFORM, FRONTEND_QUIT, 10, 10, 30, 29, P_("menu", "Return"), IMAGE_RETURN, IMAGE_RETURN_HI, IMAGE_RETURN_HI);
-	// show this only when the video sequences are not installed
-	if (!PHYSFS_exists("sequences/devastation.ogg"))
-	{
-		addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("Campaign videos are missing! Get them from http://wz2100.net"), 0);
-		notifyAboutMissingVideos();
-	}
-}
-
-static void frontEndNewGame(int which)
-{
-	std::vector<CAMPAIGN_FILE> list = readCampaignFiles();
-	sstrcpy(aLevelName, list[which].level.toUtf8().c_str());
-	// show this only when the video sequences are installed
-	if (PHYSFS_exists("sequences/devastation.ogg"))
-	{
-		if (!list[which].video.isEmpty())
-		{
-			seq_ClearSeqList();
-			seq_AddSeqToList(list[which].video.toUtf8().c_str(), nullptr, list[which].captions.toUtf8().c_str(), false);
-			seq_StartNextFullScreenVideo();
-		}
-	}
-	if (!list[which].package.isEmpty())
-	{
-		WzString path;
-		path += PHYSFS_getWriteDir();
-		path += PHYSFS_getDirSeparator();
-		path += "campaigns";
-		path += PHYSFS_getDirSeparator();
-		path += list[which].package;
-		if (!PHYSFS_mount(path.toUtf8().c_str(), NULL, PHYSFS_APPEND))
-		{
-			debug(LOG_ERROR, "Failed to load campaign mod \"%s\": %s",
-			      path.toUtf8().c_str(), WZ_PHYSFS_getLastError());
-		}
-	}
-	if (!list[which].loading.isEmpty())
-	{
-		debug(LOG_WZ, "Adding campaign mod level \"%s\"", list[which].loading.toUtf8().c_str());
-		if (!loadLevFile(list[which].loading.toUtf8(), mod_campaign, false, nullptr))
-		{
-			debug(LOG_ERROR, "Failed to load %s", list[which].loading.toUtf8().c_str());
-			return;
-		}
-	}
-	debug(LOG_WZ, "Loading campaign mod -- %s", aLevelName);
-	changeTitleMode(STARTGAME);
 }
 
 static void loadOK()
@@ -473,34 +430,7 @@ void SPinit(LEVEL_TYPE gameType)
 	setPlayerColour(0, playercolor);
 	game.hash.setZero();	// must reset this to zero
 	builtInMap = true;
-}
-
-bool runCampaignSelector()
-{
-	WidgetTriggers const &triggers = widgRunScreen(psWScreen);
-	unsigned id = triggers.empty() ? 0 : triggers.front().widget->id; // Just use first click here, since the next click could be on another menu.
-	if (id == FRONTEND_QUIT)
-	{
-		changeTitleMode(SINGLE); // go back
-	}
-	else if (id >= FRONTEND_CAMPAIGN_1 && id <= FRONTEND_CAMPAIGN_6) // chose a campaign
-	{
-		SPinit(LEVEL_TYPE::CAMPAIGN);
-		frontEndNewGame(id - FRONTEND_CAMPAIGN_1);
-	}
-	else if (id == FRONTEND_HYPERLINK)
-	{
-		runHyperlink();
-	}
-
-	widgDisplayScreen(psWScreen); // show the widgets currently running
-
-	if (CancelPressed())
-	{
-		changeTitleMode(SINGLE);
-	}
-
-	return true;
+	useTerrainOverrides = true;
 }
 
 bool runSinglePlayerMenu()
@@ -524,7 +454,8 @@ bool runSinglePlayerMenu()
 		switch (id)
 		{
 		case FRONTEND_NEWGAME:
-			changeTitleMode(CAMPAIGNS);
+			ActivityManager::instance().navigateToMenu("Campaign");
+			changeTitleUI(std::make_shared<WzCampaignSelectorTitleUI>(wzTitleUICurrent));
 			break;
 
 		case FRONTEND_LOADGAME_MISSION:
@@ -598,20 +529,26 @@ bool runSinglePlayerMenu()
 // Multi Player Menu
 void startMultiPlayerMenu()
 {
+	closeMissingVideosNotification();
+
 	addBackdrop();
 	addTopForm(false);
 	addBottomForm();
 
 	addSideText(FRONTEND_SIDETEXT ,	FRONTEND_SIDEX, FRONTEND_SIDEY, _("MULTI PLAYER"));
 
+#if !defined(__EMSCRIPTEN__)
 	addTextButton(FRONTEND_HOST,     FRONTEND_POS2X, FRONTEND_POS2Y, _("Host Game"), WBUT_TXTCENTRE);
 	addTextButton(FRONTEND_JOIN,     FRONTEND_POS3X, FRONTEND_POS3Y, _("Join Game"), WBUT_TXTCENTRE);
+#endif
 	addTextButton(FRONTEND_REPLAY,   FRONTEND_POS7X, FRONTEND_POS7Y, _("View Replay"), WBUT_TXTCENTRE);
 
 	addMultiBut(psWScreen, FRONTEND_BOTFORM, FRONTEND_QUIT, 10, 10, 30, 29, P_("menu", "Return"), IMAGE_RETURN, IMAGE_RETURN_HI, IMAGE_RETURN_HI);
 
 	// This isn't really a hyperlink for now... perhaps link to the wiki ?
-	addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, _("TCP port 2100 must be opened in your firewall or router to host games!"), 0);
+	char buf[512]  =  {'\0'};
+	snprintf(buf, sizeof(buf), _("TCP port %d must be opened in your firewall or router to host games!"), NETgetGameserverPort());
+	addSmallTextButton(FRONTEND_HYPERLINK, FRONTEND_POS9X, FRONTEND_POS9Y, buf, 0);
 }
 
 bool runMultiPlayerMenu()
@@ -633,13 +570,11 @@ bool runMultiPlayerMenu()
 		case FRONTEND_HOST:
 			// don't pretend we are running a network game. Really do it!
 			NetPlay.bComms = true; // use network = true
-			NetPlay.isUPNP_CONFIGURED = false;
-			NetPlay.isUPNP_ERROR = false;
 			ingame.side = InGameSide::HOST_OR_SINGLEPLAYER;
 			bMultiPlayer = true;
 			bMultiMessages = true;
 			NETinit(true);
-			NETdiscoverUPnPDevices();
+			NETinitPortMapping();
 			game.type = LEVEL_TYPE::SKIRMISH;		// needed?
 			changeTitleUI(std::make_shared<WzMultiplayerOptionsTitleUI>(wzTitleUICurrent));
 			break;
@@ -719,7 +654,7 @@ void startOptionsMenu()
 	addTextButton(FRONTEND_MUSICMANAGER, _("Music Manager"), WBUT_TXTCENTRE);
 	addTextButton(FRONTEND_MULTIPLAYOPTIONS, _("Multiplay Options"), WBUT_TXTCENTRE);
 
-	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_POS9Y - FRONTEND_POS2Y);
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_BUTHEIGHT_LIST_SPACER);
 	parent->attach(scrollableList);
 
 	addSideText(FRONTEND_SIDETEXT, FRONTEND_SIDEX, FRONTEND_SIDEY, _("OPTIONS"));
@@ -819,6 +754,11 @@ char const *graphicsOptionsScreenShakeString()
 	return getShakeStatus() ? _("On") : _("Off");
 }
 
+char const *graphicsOptionsGroupsMenuEnabled()
+{
+	return getGroupButtonEnabled() ? _("On") : _("Off");
+}
+
 char const *graphicsOptionsSubtitlesString()
 {
 	return seq_GetSubtitles() ? _("On") : _("Off");
@@ -827,6 +767,11 @@ char const *graphicsOptionsSubtitlesString()
 char const *graphicsOptionsShadowsString()
 {
 	return getDrawShadows() ? _("On") : _("Off");
+}
+
+char const* graphicsOptionsLightingString()
+{
+	return war_getPointLightPerPixelLighting() ? _("Per Pixel") : _("Lightmap");
 }
 
 char const *graphicsOptionsFogString()
@@ -844,6 +789,326 @@ char const *graphicsOptionsRadarJumpString()
 	return war_GetRadarJump() ? _("Instant") : _("Tracked");
 }
 
+static std::shared_ptr<WIDGET> makeLODDistanceDropdown()
+{
+	std::vector<std::tuple<WzString, int>> dropDownChoices = {
+		{_("High"), WZ_LODDISTANCEPERCENTAGE_HIGH},
+		{_("Default"), 0} // the *system* default (no supplied bias)
+	};
+
+	// If current value (from config) is not one of the presets in dropDownChoices, add a "Custom" entry
+	size_t currentSettingIdx = 0;
+	int currValue = war_getLODDistanceBiasPercentage();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, int>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+	else
+	{
+		dropDownChoices.push_back({WzString::fromUtf8(astringf("(%d)", currValue)), currValue});
+		currentSettingIdx = dropDownChoices.size() - 1;
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_LOD_DISTANCE_R;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setOnChange([dropDownChoices](DropdownWidget& dropdown) {
+		if (auto selectedIndex = dropdown.getSelectedIndex())
+		{
+			ASSERT_OR_RETURN(, selectedIndex.value() < dropDownChoices.size(), "Invalid index");
+			war_setLODDistanceBiasPercentage(std::get<1>(dropDownChoices.at(selectedIndex.value())));
+		}
+	});
+
+	return Margin(0, 10).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeTerrainQualityDropdown()
+{
+	std::vector<std::tuple<WzString, TerrainShaderQuality>> dropDownChoices = {
+		{WzString::fromUtf8(to_display_string(TerrainShaderQuality::CLASSIC)), TerrainShaderQuality::CLASSIC},
+		{WzString::fromUtf8(to_display_string(TerrainShaderQuality::MEDIUM)), TerrainShaderQuality::MEDIUM},
+		{WzString::fromUtf8(to_display_string(TerrainShaderQuality::NORMAL_MAPPING)), TerrainShaderQuality::NORMAL_MAPPING}
+	};
+
+	size_t currentSettingIdx = 0;
+	auto currValue = getTerrainShaderQuality();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, TerrainShaderQuality>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_TERRAIN_QUALITY_R;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		bool supportedMode = isSupportedTerrainShaderQualityOption(std::get<1>(option));
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), supportedMode ? 0 : WBUT_DISABLE);
+		if (!supportedMode)
+		{
+			item->setTip(_("Terrain quality mode not available."));
+		}
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		auto newMode = std::get<1>(dropDownChoices.at(newIndex));
+		if (!isSupportedTerrainShaderQualityOption(newMode))
+		{
+			return false;
+		}
+		if (!setTerrainShaderQuality(newMode))
+		{
+			debug(LOG_ERROR, "Failed to set terrain shader quality: %s", to_display_string(newMode).c_str());
+			return false;
+		}
+		return true;
+	});
+
+	return Margin(0, 10).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeTerrainShadingQualityDropdown()
+{
+	std::vector<std::tuple<WzString, int32_t>> dropDownChoices = {
+		{_("Medium Quality"), 512},
+		{_("High Quality"), 1024},
+	};
+
+	size_t currentSettingIdx = 0;
+	auto currValue = getTerrainMappingTexturesMaxSize();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, int32_t>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_TERRAIN_SHADING_QUALITY_R;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		bool supportedMode = true;
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), supportedMode ? 0 : WBUT_DISABLE);
+		if (!supportedMode)
+		{
+			item->setTip(_("Terrain quality mode not available."));
+		}
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		auto newMode = std::get<1>(dropDownChoices.at(newIndex));
+		if (!setTerrainMappingTexturesMaxSize(newMode))
+		{
+			debug(LOG_ERROR, "Failed to set terrain mapping texture quality: %d", newMode);
+			return false;
+		}
+		return true;
+	});
+
+	return Margin(0, 10).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeShadowMapResolutionDropdown()
+{
+	std::vector<std::tuple<WzString, uint32_t>> dropDownChoices = {
+		{WzString::fromUtf8(_("Normal")) + " (2048)", 2048},
+		{WzString::fromUtf8(_("High")) + " (4096)", 4096}
+	};
+
+	// If current value is not one of the presets in dropDownChoices, add a "Custom" entry
+	size_t currentSettingIdx = 0;
+	uint32_t currValue = pie_getShadowMapResolution();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, uint32_t>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+	else
+	{
+		dropDownChoices.push_back({WzString::fromUtf8(astringf("(Custom: %" PRIu32 ")", currValue)), currValue});
+		currentSettingIdx = dropDownChoices.size() - 1;
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_SHADOWMAP_RESOLUTION_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		bool supportedShadowMapResolution = pie_supportsShadowMapping().value_or(false);
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), supportedShadowMapResolution ? 0 : WBUT_DISABLE);
+		if (!supportedShadowMapResolution)
+		{
+			item->setTip(_("Shadow mapping not available on this system."));
+		}
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		auto newResolution = std::get<1>(dropDownChoices.at(newIndex));
+		if (!pie_supportsShadowMapping().value_or(false))
+		{
+			return false;
+		}
+		if (!pie_setShadowMapResolution(newResolution))
+		{
+			debug(LOG_ERROR, "Failed to set map resolution: %" PRIu32, newResolution);
+			return false;
+		}
+		war_setShadowMapResolution(newResolution);
+		return true;
+	});
+
+	return Margin(0, 10).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeShadowFilterSizeDropdown()
+{
+	std::vector<std::tuple<WzString, uint32_t>> dropDownChoices = {
+		{WzString::fromUtf8(_("Low")), 3},
+		{WzString::fromUtf8(_("High")), 5},
+		{WzString::fromUtf8(_("Ultra")), 7}
+	};
+
+	// If current value (from config) is not one of the presets in dropDownChoices, add a "Custom" entry
+	size_t currentSettingIdx = 0;
+	uint32_t currValue = gfx_api::context::get().getShadowConstants().shadowFilterSize;
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, uint32_t>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+	else
+	{
+		dropDownChoices.push_back({WzString::fromUtf8(astringf("(Custom: %u)", currValue)), currValue});
+		currentSettingIdx = dropDownChoices.size() - 1;
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_SHADOW_FILTER_SIZE_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		bool supportedFilterSize = pie_supportsShadowMapping().value_or(false);
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), supportedFilterSize ? 0 : WBUT_DISABLE);
+		if (!supportedFilterSize)
+		{
+			item->setTip(_("Shadow filtering not available on this system."));
+		}
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		auto newFilterSize = std::get<1>(dropDownChoices.at(newIndex));
+		if (!pie_supportsShadowMapping().value_or(false))
+		{
+			return false;
+		}
+		auto shadowConstants = gfx_api::context::get().getShadowConstants();
+		shadowConstants.shadowFilterSize = newFilterSize;
+		if (!gfx_api::context::get().setShadowConstants(shadowConstants))
+		{
+			debug(LOG_ERROR, "Failed to set shadow filter size: %" PRIu32, newFilterSize);
+			return false;
+		}
+		war_setShadowFilterSize(newFilterSize);
+		return true;
+	});
+
+	return Margin(0, 10).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeOptionsButtonDropdown()
+{
+	std::vector<std::tuple<WzString, uint8_t>> dropDownChoices = {
+		{WzString::fromUtf8(_("On")), 100},
+		{WzString::fromUtf8(_("Opacity: 50%")), 50},
+		{WzString::fromUtf8(_("Off")), 0}
+	};
+
+	// If current value (from config) is not one of the presets in dropDownChoices, add a "Custom" entry
+	size_t currentSettingIdx = 0;
+	uint8_t currValue = war_getOptionsButtonVisibility();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, uint8_t>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+	else
+	{
+		dropDownChoices.push_back({WzString::fromUtf8(astringf("(Custom: %u)", currValue)), currValue});
+		currentSettingIdx = dropDownChoices.size() - 1;
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_INGAMEOPTIONS_BUTTON_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		auto newValue = std::get<1>(dropDownChoices.at(newIndex));
+		war_setOptionsButtonVisibility(newValue);
+		return true;
+	});
+
+	return Margin(0, 10).wrap(dropdown);
+}
+
 // ////////////////////////////////////////////////////////////////////////////
 // Graphics Options
 void startGraphicsOptionsMenu()
@@ -854,24 +1119,59 @@ void startGraphicsOptionsMenu()
 
 	WIDGET *parent = widgGetFromID(psWScreen, FRONTEND_BOTFORM);
 
+	auto label = std::make_shared<W_LABEL>();
+	parent->attach(label);
+	label->setGeometry(FRONTEND_POS1X + 48, FRONTEND_POS1Y - 14, FRONTEND_BUTWIDTH - FRONTEND_POS1X - 48, FRONTEND_BUTHEIGHT);
+	label->setFontColour(WZCOL_TEXT_BRIGHT);
+	label->setString(_("* Takes effect on game restart"));
+	label->setTextAlignment(WLAB_ALIGNBOTTOMLEFT);
+
 	auto grid = std::make_shared<GridLayout>();
 	grid_allocation::slot row(0);
 
-	////////////
-	//FMV mode.
-	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_FMVMODE, _("Video Playback"), WBUT_SECONDARY)));
-	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_FMVMODE_R, graphicsOptionsFmvmodeString(), WBUT_SECONDARY)));
+	// Terrain Quality
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_TERRAIN_QUALITY, _("Terrain Quality"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, makeTerrainQualityDropdown());
 	row.start++;
 
-	// Scanlines
-	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_SCANLINES, _("Scanlines"), WBUT_SECONDARY)));
-	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_SCANLINES_R, graphicsOptionsScanlinesString(), WBUT_SECONDARY)));
+	// Terrain Shading Quality
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_TERRAIN_SHADING_QUALITY, _("Terrain Shading"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, makeTerrainShadingQualityDropdown());
 	row.start++;
 
 	////////////
-	//shadows
+	// Shadows
 	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_SHADOWS, _("Shadows"), WBUT_SECONDARY)));
 	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_SHADOWS_R, graphicsOptionsShadowsString(), WBUT_SECONDARY)));
+	row.start++;
+
+	bool bShadowMappingSupported = pie_supportsShadowMapping().value_or(false);
+
+	if (bShadowMappingSupported)
+	{
+		// shadow resolution
+		grid->place({0}, row, addMargin(makeTextButton(FRONTEND_SHADOWMAP_RESOLUTION, _("Shadow Resolution"), (!bShadowMappingSupported) ? WBUT_DISABLE : 0)));
+		grid->place({1, 1, false}, row, makeShadowMapResolutionDropdown());
+		row.start++;
+
+		// shadow filtering
+		grid->place({0}, row, addMargin(makeTextButton(FRONTEND_SHADOW_FILTER_SIZE, _("Shadow Filtering"), (!bShadowMappingSupported) ? WBUT_DISABLE : 0)));
+		grid->place({1, 1, false}, row, makeShadowFilterSizeDropdown());
+		row.start++;
+	}
+
+	///////////
+	// Lighting
+	grid->place({ 0 }, row, addMargin(makeTextButton(FRONTEND_LIGHTS, _("Per Pixel point lights"), WBUT_SECONDARY)));
+	grid->place({ 1, 1, false }, row, addMargin(makeTextButton(FRONTEND_LIGHTS_R, graphicsOptionsLightingString(), WBUT_SECONDARY)));
+	row.start++;
+
+	// LOD Distance
+	// TRANSLATORS: "LOD" = "Level of Detail" - this setting is used to describe how level of detail (in textures) is preserved as distance increases (examples: "Default", "High", etc)
+	std::string lodDistanceString = _("LOD Distance");
+	lodDistanceString += "*"; // takes effect on game restart
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_LOD_DISTANCE, lodDistanceString.c_str(), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, makeLODDistanceDropdown());
 	row.start++;
 
 	// fog
@@ -889,15 +1189,36 @@ void startGraphicsOptionsMenu()
 	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_RADAR_JUMP_R, graphicsOptionsRadarJumpString(), WBUT_SECONDARY)));
 	row.start++;
 
+	////////////
+	//FMV mode.
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_FMVMODE, _("Video Playback"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_FMVMODE_R, graphicsOptionsFmvmodeString(), WBUT_SECONDARY)));
+	row.start++;
+
+	// Scanlines
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_SCANLINES, _("Scanlines"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_SCANLINES_R, graphicsOptionsScanlinesString(), WBUT_SECONDARY)));
+	row.start++;
+
 	// screenshake
 	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_SSHAKE, _("Screen Shake"), WBUT_SECONDARY)));
 	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_SSHAKE_R, graphicsOptionsScreenShakeString(), WBUT_SECONDARY)));
 	row.start++;
 
+	// groups menu
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_GROUPS, _("Groups Menu"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_GROUPS_R, graphicsOptionsGroupsMenuEnabled(), WBUT_SECONDARY)));
+	row.start++;
+
+	// In-Game Options button
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_INGAMEOPTIONS_BUTTON, _("Options Button"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, makeOptionsButtonDropdown());
+	row.start++;
+
 	grid->setGeometry(0, 0, FRONTEND_BUTWIDTH, grid->idealHeight());
 
 	auto scrollableList = ScrollableListWidget::make();
-	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_POS2Y - 1);
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_BUTHEIGHT_LIST_SPACER);
 	scrollableList->addItem(grid);
 	parent->attach(scrollableList);
 
@@ -935,7 +1256,27 @@ bool runGraphicsOptionsMenu()
 		setDrawShadows(!getDrawShadows());
 		widgSetString(psWScreen, FRONTEND_SHADOWS_R, graphicsOptionsShadowsString());
 		break;
-
+	case FRONTEND_LIGHTS:
+	case FRONTEND_LIGHTS_R:
+	{
+		bool newValue = !war_getPointLightPerPixelLighting();
+		if (getTerrainShaderQuality() != TerrainShaderQuality::NORMAL_MAPPING)
+		{
+			newValue = false; // point light per pixel lighting is only supported in normal_mapping mode
+		}
+		auto shadowConstants = gfx_api::context::get().getShadowConstants();
+		shadowConstants.isPointLightPerPixelEnabled = newValue;
+		if (gfx_api::context::get().setShadowConstants(shadowConstants))
+		{
+			war_setPointLightPerPixelLighting(newValue);
+			widgSetString(psWScreen, FRONTEND_LIGHTS_R, graphicsOptionsLightingString());
+		}
+		else
+		{
+			debug(LOG_ERROR, "Failed to set per pixel point lighting value: %d", (int)newValue);
+		}
+		break;
+	}
 	case FRONTEND_FOG:
 	case FRONTEND_FOG_R:
 		if (pie_GetFogEnabled())
@@ -978,6 +1319,13 @@ bool runGraphicsOptionsMenu()
 	case FRONTEND_SSHAKE_R:
 		setShakeStatus(!getShakeStatus());
 		widgSetString(psWScreen, FRONTEND_SSHAKE_R, graphicsOptionsScreenShakeString());
+		break;
+
+	case FRONTEND_GROUPS:
+	case FRONTEND_GROUPS_R:
+		setGroupButtonEnabled(!getGroupButtonEnabled());
+		war_setGroupsMenuEnabled(getGroupButtonEnabled()); // persist
+		widgSetString(psWScreen, FRONTEND_GROUPS_R, graphicsOptionsGroupsMenuEnabled());
 		break;
 
 	default:
@@ -1118,7 +1466,7 @@ void startAudioAndZoomOptionsMenu()
 	grid->setGeometry(0, 0, FRONTEND_BUTWIDTH, grid->idealHeight());
 
 	auto scrollableList = ScrollableListWidget::make();
-	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_POS2Y - 1);
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_BUTHEIGHT_LIST_SPACER);
 	scrollableList->addItem(grid);
 	parent->attach(scrollableList);
 
@@ -1269,20 +1617,6 @@ static void videoOptionsEnableResolutionButtons()
 	widgReveal(psWScreen, FRONTEND_RESOLUTION_DROPDOWN);
 }
 
-static char const *videoOptionsWindowModeString()
-{
-	switch (war_getWindowMode())
-	{
-		case WINDOW_MODE::desktop_fullscreen:
-			return _("Desktop Full");
-		case WINDOW_MODE::windowed:
-			return _("Windowed");
-		case WINDOW_MODE::fullscreen:
-			return _("Fullscreen");
-	}
-	return "n/a"; // silence warning
-}
-
 static std::string videoOptionsAntialiasingString()
 {
 	if (war_getAntialiasing() == 0)
@@ -1409,7 +1743,7 @@ public:
 
 		auto currentResolution = getCurrentResolution();
 		// Attempt to change the resolution
-		if (!wzChangeWindowResolution(selectedResolution.screen, selectedResolution.width, selectedResolution.height))
+		if (!wzChangeFullscreenDisplayMode(selectedResolution.screen, selectedResolution.width, selectedResolution.height))
 		{
 			debug(
 				LOG_WARNING,
@@ -1420,9 +1754,9 @@ public:
 		}
 
 		// Store the new width and height
-		war_SetScreen(selectedResolution.screen);
-		war_SetWidth(selectedResolution.width);
-		war_SetHeight(selectedResolution.height);
+		war_SetFullscreenModeScreen(selectedResolution.screen);
+		war_SetFullscreenModeWidth(selectedResolution.width);
+		war_SetFullscreenModeHeight(selectedResolution.height);
 
 		// Update the widget(s)
 		refreshCurrentVideoOptionsValues();
@@ -1441,14 +1775,22 @@ public:
 private:
 	const std::vector<screeninfo> modes;
 
-	static screeninfo getCurrentResolution()
+	static screeninfo getCurrentWindowedResolution()
 	{
+		int screen = 0;
+		unsigned int windowWidth = 0, windowHeight = 0;
+		wzGetWindowResolution(&screen, &windowWidth, &windowHeight);
 		screeninfo info;
-		info.screen = war_GetScreen();
-		info.width = war_GetWidth();
-		info.height = war_GetHeight();
+		info.screen = screen;
+		info.width = windowWidth;
+		info.height = windowHeight;
 		info.refresh_rate = -1;  // Unused.
 		return info;
+	}
+
+	static screeninfo getCurrentResolution(optional<WINDOW_MODE> modeOverride = nullopt)
+	{
+		return (modeOverride.value_or(wzGetCurrentWindowMode()) == WINDOW_MODE::fullscreen) ? wzGetCurrentFullscreenDisplayMode() : getCurrentWindowedResolution();
 	}
 
 	static std::vector<screeninfo> loadModes()
@@ -1477,9 +1819,163 @@ private:
 	}
 };
 
+class WindowModeDropdown : public DropdownWidget
+{
+public:
+	static std::shared_ptr<WindowModeDropdown> make(UDWORD widgId = 0, int32_t paddingSize = 10)
+	{
+		auto dropdown = std::make_shared<WindowModeDropdown>();
+		dropdown->id = widgId;
+
+		dropdown->windowModeModel = WindowModeDropdown::getSupportedWindowModesModel();
+
+		dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropdown->windowModeModel.size()));
+
+		for (const auto& option : dropdown->windowModeModel)
+		{
+			auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
+			dropdown->addItem(Margin(0, paddingSize).wrap(item));
+		}
+
+		dropdown->updateSelectedIndex();
+
+		dropdown->setCanChange([](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+			auto psDropdown = std::dynamic_pointer_cast<WindowModeDropdown>(widget.shared_from_this());
+			ASSERT_OR_RETURN(false, psDropdown != nullptr, "Invalid widget");
+			ASSERT_OR_RETURN(false, newIndex < psDropdown->windowModeModel.size(), "Invalid index");
+			auto newMode = std::get<1>(psDropdown->windowModeModel.at(newIndex));
+			if (newMode == wzGetCurrentWindowMode())
+			{
+				return true;
+			}
+			bool success = wzChangeWindowMode(newMode);
+			if (success)
+			{
+				war_setWindowMode(newMode);
+				// Update the widget(s)
+				refreshCurrentVideoOptionsValues();
+			}
+			else
+			{
+				// unable to change to this fullscreen mode, so disable the widget
+				debug(LOG_ERROR, "Failed to set fullscreen mode: %s", to_display_string(newMode).c_str());
+				auto pTextButtonWrapper = std::dynamic_pointer_cast<MarginWidget>(newSelectedWidget);
+				if (pTextButtonWrapper && !pTextButtonWrapper->children().empty())
+				{
+					auto pTextButton = std::dynamic_pointer_cast<W_BUTTON>(pTextButtonWrapper->children().front());
+					if (pTextButton)
+					{
+						pTextButton->setState(WBUT_DISABLE);
+					}
+				}
+			}
+			return success;
+		});
+
+		return dropdown;
+	};
+
+	void updateSelectedIndex()
+	{
+		size_t currentSettingIdx = 0;
+		auto currValue = war_getWindowMode();
+		auto it = std::find_if(windowModeModel.begin(), windowModeModel.end(), [currValue](const std::tuple<WzString, WINDOW_MODE>& item) -> bool {
+			return std::get<1>(item) == currValue;
+		});
+		if (it != windowModeModel.end())
+		{
+			currentSettingIdx = it - windowModeModel.begin();
+			setSelectedIndex(currentSettingIdx);
+		}
+	}
+
+private:
+	static std::vector<std::tuple<WzString, WINDOW_MODE>> getSupportedWindowModesModel()
+	{
+		std::vector<std::tuple<WzString, WINDOW_MODE>> dropDownChoices = {
+			{_("Windowed"), WINDOW_MODE::windowed},
+			{_("Desktop Full"), WINDOW_MODE::desktop_fullscreen},
+			{_("Fullscreen"), WINDOW_MODE::fullscreen},
+		};
+
+		dropDownChoices.erase(std::remove_if(dropDownChoices.begin(), dropDownChoices.end(), [](const std::tuple<WzString, WINDOW_MODE>& item) -> bool {
+			return !wzIsSupportedWindowMode(std::get<1>(item));
+		}), dropDownChoices.end());
+
+		return dropDownChoices;
+	}
+
+private:
+	std::vector<std::tuple<WzString, WINDOW_MODE>> windowModeModel;
+};
+
+class ResolutionDropdown : public DropdownWidget
+{
+public:
+	static std::shared_ptr<ResolutionDropdown> make(UDWORD widgId = 0, int32_t paddingSize = 10)
+	{
+		auto dropdown = std::make_shared<ResolutionDropdown>();
+		dropdown->id = widgId;
+		dropdown->setListHeight(FRONTEND_BUTHEIGHT * 5);
+
+		ScreenResolutionsModel screenResolutionsModel;
+		for (auto resolution: screenResolutionsModel)
+		{
+			auto item = makeTextButton(0, ScreenResolutionsModel::resolutionString(resolution), 0);
+			dropdown->addItem(Margin(0, paddingSize).wrap(item));
+		}
+
+		auto closestResolution = screenResolutionsModel.findResolutionClosestToCurrent();
+		if (closestResolution != screenResolutionsModel.end())
+		{
+			dropdown->setSelectedIndex(closestResolution - screenResolutionsModel.begin());
+		}
+
+		dropdown->setOnChange([screenResolutionsModel](DropdownWidget& dropdown) {
+			auto pResolutionDropdown = std::dynamic_pointer_cast<ResolutionDropdown>(dropdown.shared_from_this());
+			if (!pResolutionDropdown)
+			{
+				return;
+			}
+			if (pResolutionDropdown->skipActualResolutionChange)
+			{
+				return;
+			}
+			if (auto selectedIndex = pResolutionDropdown->getSelectedIndex())
+			{
+				screenResolutionsModel.selectAt(selectedIndex.value());
+			}
+		});
+
+		return dropdown;
+	};
+
+	void updateSelectedIndex()
+	{
+		auto closestResolution = screenResolutionsModel.findResolutionClosestToCurrent();
+		if (closestResolution != screenResolutionsModel.end())
+		{
+			skipActualResolutionChange = true;
+			setSelectedIndex(closestResolution - screenResolutionsModel.begin());
+			skipActualResolutionChange = false;
+		}
+	}
+private:
+	ScreenResolutionsModel screenResolutionsModel;
+	bool skipActualResolutionChange = false;
+};
+
 void refreshCurrentVideoOptionsValues()
 {
-	widgSetString(psWScreen, FRONTEND_WINDOWMODE_R, videoOptionsWindowModeString());
+	WIDGET *psWindowModeDropdownWidg = widgGetFromID(psWScreen, FRONTEND_WINDOWMODE_R);
+	if (psWindowModeDropdownWidg)
+	{
+		auto windowModeWidg = std::dynamic_pointer_cast<WindowModeDropdown>(psWindowModeDropdownWidg->shared_from_this());
+		if (windowModeWidg)
+		{
+			windowModeWidg->updateSelectedIndex();
+		}
+	}
 	widgSetString(psWScreen, FRONTEND_FSAA_R, videoOptionsAntialiasingString().c_str());
 	if (widgGetFromID(psWScreen, FRONTEND_RESOLUTION_READONLY)) // Resolution option may not be available
 	{
@@ -1493,6 +1989,15 @@ void refreshCurrentVideoOptionsValues()
 		else
 		{
 			videoOptionsEnableResolutionButtons();
+			WIDGET *psDropdownWidg = widgGetFromID(psWScreen, FRONTEND_RESOLUTION_DROPDOWN);
+			if (psDropdownWidg)
+			{
+				auto pResolutionDropdown = std::dynamic_pointer_cast<ResolutionDropdown>(psDropdownWidg->shared_from_this());
+				if (pResolutionDropdown)
+				{
+					pResolutionDropdown->updateSelectedIndex();
+				}
+			}
 		}
 	}
 	widgSetString(psWScreen, FRONTEND_TEXTURESZ_R, videoOptionsTextureSizeString().c_str());
@@ -1505,31 +2010,117 @@ void refreshCurrentVideoOptionsValues()
 
 static std::shared_ptr<WIDGET> makeResolutionDropdown()
 {
-	auto dropdown = std::make_shared<DropdownWidget>();
-	dropdown->id = FRONTEND_RESOLUTION_DROPDOWN;
-	dropdown->setListHeight(FRONTEND_BUTHEIGHT * 5);
 	const auto paddingSize = 10;
+	auto dropdown = ResolutionDropdown::make(FRONTEND_RESOLUTION_DROPDOWN);
+	return Margin(0, -paddingSize).wrap(dropdown);
+}
 
-	ScreenResolutionsModel screenResolutionsModel;
-	for (auto resolution: screenResolutionsModel)
+static std::shared_ptr<WIDGET> makeMinimizeOnFocusLossDropdown()
+{
+	std::vector<std::tuple<WzString, MinimizeOnFocusLossBehavior>> dropDownChoices = {
+		{_("Auto"), MinimizeOnFocusLossBehavior::Auto},
+		{_("Off"), MinimizeOnFocusLossBehavior::Off},
+		{_("On (Fullscreen)"), MinimizeOnFocusLossBehavior::On_Fullscreen},
+	};
+
+	size_t currentSettingIdx = 0;
+	auto currValue = wzGetCurrentMinimizeOnFocusLossBehavior();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, MinimizeOnFocusLossBehavior>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
 	{
-		auto item = makeTextButton(0, ScreenResolutionsModel::resolutionString(resolution), 0);
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_MINIMIZE_ON_FOCUS_LOSS_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const int paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
 		dropdown->addItem(Margin(0, paddingSize).wrap(item));
 	}
 
-	auto closestResolution = screenResolutionsModel.findResolutionClosestToCurrent();
-	if (closestResolution != screenResolutionsModel.end())
-	{
-		dropdown->setSelectedIndex(closestResolution - screenResolutionsModel.begin());
-	}
+	dropdown->setSelectedIndex(currentSettingIdx);
 
-	dropdown->setOnChange([screenResolutionsModel](DropdownWidget& dropdown) {
+	dropdown->setOnChange([dropDownChoices](DropdownWidget& dropdown) {
 		if (auto selectedIndex = dropdown.getSelectedIndex())
 		{
-			screenResolutionsModel.selectAt(selectedIndex.value());
+			ASSERT_OR_RETURN(, selectedIndex.value() < dropDownChoices.size(), "Invalid index");
+			auto behavior = std::get<1>(dropDownChoices.at(selectedIndex.value()));
+			wzSetMinimizeOnFocusLoss(behavior);
+			war_setMinimizeOnFocusLoss(static_cast<int>(behavior));
 		}
 	});
 
+	return Margin(0, -paddingSize).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeFullscreenToggleModeDropdown()
+{
+	std::vector<std::tuple<WzString, WINDOW_MODE>> dropDownChoices = {
+		{_("Desktop Full"), WINDOW_MODE::desktop_fullscreen},
+		{_("Fullscreen"), WINDOW_MODE::fullscreen},
+	};
+
+	dropDownChoices.erase(std::remove_if(dropDownChoices.begin(), dropDownChoices.end(), [](const std::tuple<WzString, WINDOW_MODE>& item) -> bool {
+		return !wzIsSupportedWindowMode(std::get<1>(item));
+	}), dropDownChoices.end());
+
+	if (dropDownChoices.size() <= 1)
+	{
+		// Don't bother making this dropdown if there is only 1 (or zero) fullscreen modes available
+		return nullptr;
+	}
+
+	size_t currentSettingIdx = 0;
+	auto currValue = wzGetToggleFullscreenMode();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, WINDOW_MODE>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_MINIMIZE_ON_FOCUS_LOSS_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const int paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		auto toggleFullscreenMode = std::get<1>(dropDownChoices.at(newIndex));
+		bool success = wzSetToggleFullscreenMode(toggleFullscreenMode);
+		if (success)
+		{
+			war_setToggleFullscreenMode(static_cast<int>(toggleFullscreenMode));
+		}
+		else
+		{
+			debug(LOG_ERROR, "Failed to set toggle fullscreen mode");
+		}
+		return success;
+	});
+
+	return Margin(0, -paddingSize).wrap(dropdown);
+}
+
+static std::shared_ptr<WIDGET> makeWindowModeDropdown()
+{
+	const int paddingSize = 10;
+	auto dropdown = WindowModeDropdown::make(FRONTEND_WINDOWMODE_R, paddingSize);
 	return Margin(0, -paddingSize).wrap(dropdown);
 }
 
@@ -1554,7 +2145,7 @@ void startVideoOptionsMenu()
 
 	// Fullscreen/windowed
 	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_WINDOWMODE, videoOptionsWindowModeLabel(), WBUT_SECONDARY)));
-	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_WINDOWMODE_R, videoOptionsWindowModeString(), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeWindowModeDropdown()));
 	row.start++;
 
 	// Resolution
@@ -1614,10 +2205,32 @@ void startVideoOptionsMenu()
 	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_GFXBACKEND_R, videoOptionsGfxBackendString(), WBUT_SECONDARY)));
 	row.start++;
 
+#if !defined(__EMSCRIPTEN__)
+	// Minimize on Focus Loss
+	// TRANSLATORS: Shortened form of "Minimize on Focus Loss"
+	// An option describing when / whether WZ will auto-minimize the window when it loses focus.
+	auto minimizeOnFocusLossLabel = makeTextButton(FRONTEND_MINIMIZE_ON_FOCUS_LOSS, _("Min on Focus Loss"), WBUT_SECONDARY);
+	minimizeOnFocusLossLabel->setTip(_("Whether the window should auto-minimize on focus loss"));
+	grid->place({0}, row, addMargin(minimizeOnFocusLossLabel));
+	grid->place({1, 1, false}, row, addMargin(makeMinimizeOnFocusLossDropdown()));
+	row.start++;
+#endif
+
+	auto fullscreenToggleModeDropdown = makeFullscreenToggleModeDropdown();
+	if (fullscreenToggleModeDropdown)
+	{
+		// TRANSLATORS: The fullscreen mode used when toggling with keys: Alt + Enter
+		auto altEnterToggleLabel = makeTextButton(FRONTEND_ALTENTER_TOGGLE_MODE, _("Alt+Enter Toggle"), WBUT_SECONDARY);
+		altEnterToggleLabel->setTip(_("The fullscreen mode used when toggling with keys: Alt + Enter"));
+		grid->place({0}, row, addMargin(altEnterToggleLabel));
+		grid->place({1, 1, false}, row, addMargin(fullscreenToggleModeDropdown));
+		row.start++;
+	}
+
 	grid->setGeometry(0, 0, FRONTEND_BUTWIDTH, grid->idealHeight());
 
 	auto scrollableList = ScrollableListWidget::make();
-	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_POS2Y - 1);
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_BUTHEIGHT_LIST_SPACER);
 	scrollableList->addItem(grid);
 	parent->attach(scrollableList);
 
@@ -1635,43 +2248,6 @@ std::vector<unsigned int> availableDisplayScalesSorted()
 	std::vector<unsigned int> displayScales = wzAvailableDisplayScales();
 	std::sort(displayScales.begin(), displayScales.end());
 	return displayScales;
-}
-
-void seqWindowMode()
-{
-	auto currentFullscreenMode = war_getWindowMode();
-	bool success = false;
-
-	auto supportedFullscreenModes = wzSupportedWindowModes();
-	if (supportedFullscreenModes.empty()) { return; }
-	size_t currentFullscreenModePos = 0;
-	for (size_t i = 0; i < supportedFullscreenModes.size(); i++)
-	{
-		if (supportedFullscreenModes[i] == currentFullscreenMode)
-		{
-			currentFullscreenModePos = i;
-			break;
-		}
-	}
-	auto startingFullscreenModePos = currentFullscreenModePos;
-
-	do
-	{
-		currentFullscreenModePos = seqCycle(currentFullscreenModePos, static_cast<size_t>(0), 1, supportedFullscreenModes.size() - 1);
-		success = wzChangeWindowMode(supportedFullscreenModes[currentFullscreenModePos]);
-
-	} while ((!success) && (currentFullscreenModePos != startingFullscreenModePos));
-
-	if (currentFullscreenModePos == startingFullscreenModePos)
-	{
-		// Failed to change window mode - display messagebox
-		wzDisplayDialog(Dialog_Warning, _("Unable to change Window Mode"), _("Warzone failed to change the Window mode.\nYour system / drivers may not support other modes."));
-	}
-	else if (success)
-	{
-		// succeeded changing vsync mode
-		war_setWindowMode(supportedFullscreenModes[currentFullscreenModePos]);
-	}
 }
 
 void seqVsyncMode()
@@ -1697,6 +2273,7 @@ void seqVsyncMode()
 	{
 		// succeeded changing vsync mode
 		saveCurrentSwapMode(currentVsyncMode);
+		wzPostChangedSwapInterval();
 	}
 }
 
@@ -1752,16 +2329,6 @@ bool runVideoOptionsMenu()
 
 	switch (id)
 	{
-	case FRONTEND_WINDOWMODE:
-	case FRONTEND_WINDOWMODE_R:
-		{
-			seqWindowMode();
-
-			// Update the widget(s)
-			refreshCurrentVideoOptionsValues();
-		}
-		break;
-
 	case FRONTEND_FSAA:
 	case FRONTEND_FSAA_R:
 		{
@@ -1865,6 +2432,56 @@ char const *mouseOptionsCursorModeString()
 	return war_GetColouredCursor() ? _("On") : _("Off");
 }
 
+static std::shared_ptr<WIDGET> makeCursorScaleDropdown()
+{
+	std::vector<std::tuple<WzString, unsigned int>> dropDownChoices = {
+		{"100%", 100},
+		{"125%", 125},
+		{"150%", 150},
+		{"200%", 200}
+	};
+
+	// If current value (from config) is not one of the presets in dropDownChoices, add a "Custom" entry
+	size_t currentSettingIdx = 0;
+	unsigned int currValue = war_getCursorScale();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, int>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+	else
+	{
+		dropDownChoices.push_back({WzString::fromUtf8(astringf("(%u%%)", currValue)), currValue});
+		currentSettingIdx = dropDownChoices.size() - 1;
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_CURSORSCALE_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setCanChange([dropDownChoices](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		ASSERT_OR_RETURN(false, newIndex < dropDownChoices.size(), "Invalid index");
+		if (wzChangeCursorScale(std::get<1>(dropDownChoices.at(newIndex))))
+		{
+			return true;
+		}
+		return false;
+	});
+
+	return Margin(0, -paddingSize).wrap(dropdown);
+}
+
 // ////////////////////////////////////////////////////////////////////////////
 // Mouse Options
 void startMouseOptionsMenu()
@@ -1906,10 +2523,15 @@ void startMouseOptionsMenu()
 	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_CURSORMODE_R, mouseOptionsCursorModeString(), WBUT_SECONDARY)));
 	row.start++;
 
+	// Cursor Size / Scaling
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_CURSORSCALE, _("Cursor Size"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeCursorScaleDropdown()));
+	row.start++;
+
 	grid->setGeometry(0, 0, FRONTEND_BUTWIDTH, grid->idealHeight());
 
 	auto scrollableList = ScrollableListWidget::make();
-	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_POS2Y - 1);
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_BUTHEIGHT_LIST_SPACER);
 	scrollableList->addItem(grid);
 	parent->attach(scrollableList);
 
@@ -1979,6 +2601,7 @@ static char const *gameOptionsDifficultyString()
 {
 	switch (getDifficultyLevel())
 	{
+	case DL_SUPER_EASY: return _("Super Easy");
 	case DL_EASY: return _("Easy");
 	case DL_NORMAL: return _("Normal");
 	case DL_HARD: return _("Hard");
@@ -2003,6 +2626,256 @@ static std::string gameOptionsCameraSpeedString()
 
 // ////////////////////////////////////////////////////////////////////////////
 // Game Options Menu
+
+class LanguagesModel
+{
+public:
+	typedef const std::vector<locale_info>::iterator iterator;
+	typedef const std::vector<locale_info>::const_iterator const_iterator;
+
+	LanguagesModel()
+	{
+		locales = getLocales();
+	}
+
+	const_iterator begin() const
+	{
+		return locales.begin();
+	}
+
+	const_iterator end() const
+	{
+		return locales.end();
+	}
+
+	bool selectAt(size_t index) const
+	{
+		ASSERT_OR_RETURN(false, index < locales.size(), "Invalid index: %zu", index);
+		return setLanguage(locales[index].code);
+	}
+
+	size_t getSelectedIndex() const
+	{
+		auto currentCode = getLanguage();
+		for (auto i = 0; i < locales.size(); i++)
+		{
+			if (strcmp(currentCode, locales[i].code) == 0)
+			{
+				return i;
+			}
+		}
+
+		return 0;
+	}
+
+private:
+	std::vector<locale_info> locales;
+};
+
+class ImageDropdownItem: public MarginWidget
+{
+protected:
+	ImageDropdownItem(): MarginWidget({5, HorizontalPadding})
+	{
+		setTransparentToMouse(false);
+	}
+
+	void initialize(const AtlasImageDef *image, const char *text)
+	{
+		auto iconAlignment = Alignment::center();
+		iconAlignment.resizing = Alignment::Resizing::Fit;
+
+		auto icon = std::make_shared<ImageWidget>(image);
+		icon->setTransparentToMouse(true);
+
+		label = std::make_shared<W_LABEL>();
+		label->setFont(font_large);
+		label->setString(text);
+		label->setFontColour(WZCOL_TEXT_MEDIUM);
+		label->setTransparentToMouse(true);
+
+		auto grid = std::make_shared<GridLayout>();
+		grid->place({0, 1, false}, {0}, Resize::fixed(25, 25).wrap(iconAlignment.wrap(icon)));
+		grid->place({1}, {0}, Margin(0, 0, 0, 5).wrap(label));
+		grid->setTransparentToMouse(true);
+		attach(grid);
+	}
+
+public:
+	static std::shared_ptr<ImageDropdownItem> make(const AtlasImageDef *image, const char *text)
+	{
+		class make_shared_enabler: public ImageDropdownItem {};
+		auto widget = std::make_shared<make_shared_enabler>();
+		widget->initialize(image, text);
+		return widget;
+	}
+
+public:
+	void setDisabled()
+	{
+		disabled = true;
+	}
+
+	void display(int, int) override
+	{
+		if (disabled)
+		{
+			label->setFontColour(WZCOL_TEXT_DARK);
+			return;
+		}
+		label->setFontColour(isMouseOverWidget() ? WZCOL_TEXT_BRIGHT : WZCOL_TEXT_MEDIUM);
+	}
+
+	static const int HorizontalPadding = 10;
+
+private:
+	bool disabled = false;
+	std::shared_ptr<W_LABEL> label;
+};
+
+static std::shared_ptr<WIDGET> makeLanguageDropdown()
+{
+	const std::map<WzString, const char *> iconsMap = {
+		{"", "icon-system.png"},
+		{"ar_SA", "lang-AR.png"},
+		{"bg", "flag-BG.png"},
+		{"ca_ES", "flag-ES.png"},
+		{"cs_CZ", "flag-CZ.png"},
+		{"da", "flag-DK.png"},
+		{"de", "flag-DE.png"},
+		{"el_GR", "flag-GR.png"},
+		{"en", "flag-US.png"},
+		{"en_GB", "flag-GB.png"},
+		{"es", "flag-ES.png"},
+		{"et_EE", "flag-EE.png"},
+		{"eu_ES", "flag-ES.png"},
+		{"fi", "flag-FI.png"},
+		{"fr", "flag-FR.png"},
+		{"fy_NL", "flag-NL.png"},
+		{"ga_IE", "flag-IE.png"},
+		{"hr", "flag-HR.png"},
+		{"hu", "flag-HU.png"},
+		{"id", "flag-ID.png"},
+		{"it", "flag-IT.png"},
+		{"ko_KR", "flag-KR.png"},
+		{"la", "flag-VA.png"},
+		{"lt", "flag-LT.png"},
+		{"lv", "flag-LV.png"},
+		{"nb_NO", "flag-NO.png"},
+		{"nn_NO", "flag-NO.png"},
+		{"nl", "flag-NL.png"},
+		{"pl", "flag-PL.png"},
+		{"pt_BR", "flag-BR.png"},
+		{"pt", "flag-PT.png"},
+		{"ro", "flag-RO.png"},
+		{"ru", "flag-RU.png"},
+		{"sk", "flag-SK.png"},
+		{"sl_SI", "flag-SI.png"},
+		{"sv_SE", "flag-SE.png"},
+		{"sv", "flag-SE.png"},
+		{"tr", "flag-TR.png"},
+		{"uz", "flag-UZ.png"},
+		{"uk_UA", "flag-UA.png"},
+		{"zh_CN", "flag-CN.png"},
+		{"zh_TW", "flag-TW.png"},
+	};
+
+	if (pFlagsImages == nullptr)
+	{
+		pFlagsImages.reset(iV_LoadImageFile("images/flags.img"));
+		if (pFlagsImages == nullptr)
+		{
+			std::string errorMessage = astringf(_("Unable to load: %s."), "flags.img");
+			if (!getLoadedMods().empty())
+			{
+				errorMessage += " ";
+				errorMessage += _("Please remove all incompatible mods.");
+			}
+			debug(LOG_FATAL, "%s", errorMessage.c_str());
+		}
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_LANGUAGE_R;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * 5);
+	// NOTE: By capturing a copy of pFlagsImages in the onDelete handler, we ensure it stays around until the DropdownWidget is deleted
+	std::shared_ptr<IMAGEFILE> flagsImagesCopy = pFlagsImages;
+	dropdown->setOnDelete([flagsImagesCopy](WIDGET *psWidget) mutable {
+		flagsImagesCopy.reset();
+	});
+
+	LanguagesModel model;
+	for (auto locale: model)
+	{
+		AtlasImageDef *icon = nullptr;
+		auto mapIcon = iconsMap.find(locale.code);
+		if (mapIcon != iconsMap.end())
+		{
+			icon = (pFlagsImages) ? pFlagsImages->find(mapIcon->second) : nullptr;
+		}
+		auto option = ImageDropdownItem::make(icon, locale.name);
+		dropdown->addItem(option);
+	}
+
+	dropdown->setSelectedIndex(model.getSelectedIndex());
+
+	dropdown->setCanChange([model](DropdownWidget &widget, size_t newIndex, std::shared_ptr<WIDGET> newSelectedWidget) -> bool {
+		bool success = model.selectAt(newIndex);
+		if (!success)
+		{
+			// unable to change the locale to this entry, so disable the widget
+			auto pImageDropdownItem = std::dynamic_pointer_cast<ImageDropdownItem>(newSelectedWidget);
+			if (pImageDropdownItem)
+			{
+				pImageDropdownItem->setDisabled();
+			}
+		}
+		return success;
+	});
+
+	dropdown->setOnChange([model](DropdownWidget& dropdown) {
+		if (auto selectedIndex = dropdown.getSelectedIndex())
+		{
+			/* Hack to reset current menu text, which looks fancy. */
+			widgSetString(psWScreen, FRONTEND_SIDETEXT, _("GAME OPTIONS"));
+			widgGetFromID(psWScreen, FRONTEND_QUIT)->setTip(P_("menu", "Return"));
+			widgSetString(psWScreen, FRONTEND_LANGUAGE, _("Language"));
+			widgSetString(psWScreen, FRONTEND_COLOUR, _("Unit Colour:"));
+			widgSetString(psWScreen, FRONTEND_COLOUR_CAM, _("Campaign"));
+			widgSetString(psWScreen, FRONTEND_COLOUR_MP, _("Skirmish/Multiplayer"));
+			widgSetString(psWScreen, FRONTEND_DIFFICULTY, _("Campaign Difficulty"));
+			widgSetString(psWScreen, FRONTEND_CAMERASPEED, _("Camera Speed"));
+			widgSetString(psWScreen, FRONTEND_DIFFICULTY_R, gameOptionsDifficultyString());
+
+			// hack to update translations of AI names and tooltips
+			readAIs();
+		}
+	});
+
+	return Margin(0, -ImageDropdownItem::HorizontalPadding).wrap(dropdown);
+}
+
+class SettingsGridBuilder
+{
+public:
+	SettingsGridBuilder(std::shared_ptr<GridLayout> grid): grid(grid), row(0, 1, true) {}
+
+	void addRow(std::shared_ptr<WIDGET> leftWidget, std::shared_ptr<WIDGET> rightWidget = nullptr)
+	{
+		Alignment alignment(Alignment::Vertical::Top, Alignment::Horizontal::Left);
+		grid->place({0}, row, addMargin(alignment.wrap(leftWidget)));
+		if (rightWidget)
+		{
+			grid->place({1, 1, false}, row, addMargin(alignment.wrap(rightWidget)));
+		}
+		row.start++;
+	}
+
+private:
+	std::shared_ptr<GridLayout> grid;
+	grid_allocation::slot row;
+};
+
 void startGameOptionsMenu()
 {
 	UDWORD	w, h;
@@ -2010,31 +2883,37 @@ void startGameOptionsMenu()
 
 	addBackdrop();
 	addTopForm(false);
-	addBottomForm();
+	addBottomForm(true);
+
+	auto grid = std::make_shared<GridLayout>();
+	SettingsGridBuilder gridBuilder(grid);
+
+#define MINIMUM_GAME_OPTIONS_BUTTON_WIDTH (280)
+#define MINIMUM_GAME_OPTIONS_RIGHT_BUTTON_WIDTH (240)
 
 	// language
-	addTextButton(FRONTEND_LANGUAGE,  FRONTEND_POS2X - 35, FRONTEND_POS2Y, _("Language"), WBUT_SECONDARY);
-	addTextButton(FRONTEND_LANGUAGE_R,  FRONTEND_POS2M - 55, FRONTEND_POS2Y, getLanguageName(), WBUT_SECONDARY);
+	gridBuilder.addRow(
+		makeTextButton(FRONTEND_LANGUAGE, _("Language"), WBUT_SECONDARY, MINIMUM_GAME_OPTIONS_BUTTON_WIDTH),
+		makeLanguageDropdown()
+	);
 
 	// Difficulty
-	addTextButton(FRONTEND_DIFFICULTY,   FRONTEND_POS3X - 35, FRONTEND_POS3Y, _("Campaign Difficulty"), WBUT_SECONDARY);
-	addTextButton(FRONTEND_DIFFICULTY_R, FRONTEND_POS3M - 55, FRONTEND_POS3Y, gameOptionsDifficultyString(), WBUT_SECONDARY);
+	gridBuilder.addRow(
+		makeTextButton(FRONTEND_DIFFICULTY, _("Campaign Difficulty"), WBUT_SECONDARY, MINIMUM_GAME_OPTIONS_BUTTON_WIDTH),
+		makeTextButton(FRONTEND_DIFFICULTY_R, gameOptionsDifficultyString(), WBUT_SECONDARY, MINIMUM_GAME_OPTIONS_RIGHT_BUTTON_WIDTH)
+	);
 
 	// Camera speed
-	addTextButton(FRONTEND_CAMERASPEED, FRONTEND_POS4X - 35, FRONTEND_POS4Y, _("Camera Speed"), WBUT_SECONDARY);
-	addTextButton(FRONTEND_CAMERASPEED_R, FRONTEND_POS4M - 55, FRONTEND_POS4Y, gameOptionsCameraSpeedString(), WBUT_SECONDARY);
+	gridBuilder.addRow(
+		makeTextButton(FRONTEND_CAMERASPEED, _("Camera Speed"), WBUT_SECONDARY, MINIMUM_GAME_OPTIONS_BUTTON_WIDTH),
+		makeTextButton(FRONTEND_CAMERASPEED_R, gameOptionsCameraSpeedString(), WBUT_SECONDARY, MINIMUM_GAME_OPTIONS_RIGHT_BUTTON_WIDTH)
+	);
 
 	// Colour stuff
-	addTextButton(FRONTEND_COLOUR, FRONTEND_POS5X - 35, FRONTEND_POS5Y, _("Unit Colour:"), 0);
+	gridBuilder.addRow(makeTextButton(FRONTEND_COLOUR, _("Unit Colour:"), 0, MINIMUM_GAME_OPTIONS_BUTTON_WIDTH));
 
 	w = iV_GetImageWidth(FrontImages, IMAGE_PLAYERN);
 	h = iV_GetImageHeight(FrontImages, IMAGE_PLAYERN);
-
-	addMultiBut(psWScreen, FRONTEND_BOTFORM, FE_P0, FRONTEND_POS6M + (0 * (w + 6)) -20, FRONTEND_POS6Y, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, 0);
-	addMultiBut(psWScreen, FRONTEND_BOTFORM, FE_P4, FRONTEND_POS6M + (1 * (w + 6)) -20, FRONTEND_POS6Y, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, 4);
-	addMultiBut(psWScreen, FRONTEND_BOTFORM, FE_P5, FRONTEND_POS6M + (2 * (w + 6)) -20, FRONTEND_POS6Y, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, 5);
-	addMultiBut(psWScreen, FRONTEND_BOTFORM, FE_P6, FRONTEND_POS6M + (3 * (w + 6)) -20, FRONTEND_POS6Y, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, 6);
-	addMultiBut(psWScreen, FRONTEND_BOTFORM, FE_P7, FRONTEND_POS6M + (4 * (w + 6)) -20, FRONTEND_POS6Y, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, 7);
 
 	// FIXME: if playercolor = 1-3, then we Assert in widgSetButtonState() since we don't define FE_P1 - FE_P3
 	// I assume the reason is that in SP games, those are reserved for the AI?  Valid values are 0, 4-7.
@@ -2044,18 +2923,58 @@ void startGameOptionsMenu()
 	{
 		playercolor = 0;
 	}
-	widgSetButtonState(psWScreen, FE_P0 + playercolor, WBUT_LOCK);
-	addTextButton(FRONTEND_COLOUR_CAM, FRONTEND_POS6X - 20, FRONTEND_POS6Y, _("Campaign"), 0);
 
-	playercolor = war_getMPcolour();
+	auto campaignColor = std::make_shared<GridLayout>();
+	std::vector<int> availableCampaignColors = {0, 4, 5, 6, 7};
+	Margin unitColorMargin(0, 5, 5, 0);
+	for (uint32_t i = 0; i < availableCampaignColors.size(); i++)
+	{
+		auto colorId = availableCampaignColors[i];
+		auto button = makeMultiBut(FE_P0 + colorId, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, colorId);
+		if (colorId == playercolor)
+		{
+			button->setState(WBUT_LOCK);
+		}
+		campaignColor->place({i}, {0}, unitColorMargin.wrap(button));
+	}
+
+	Margin colorsMargin(0, 0, 0, 20);
+	gridBuilder.addRow(
+		colorsMargin.wrap(
+			Alignment(Alignment::Vertical::Top, Alignment::Horizontal::Left).wrap(
+				makeTextButton(FRONTEND_COLOUR_CAM, _("Campaign"), 0, MINIMUM_GAME_OPTIONS_BUTTON_WIDTH - colorsMargin.left)
+			)
+		),
+		campaignColor
+	);
+
+	auto multiplayerColor = std::make_shared<GridLayout>();
 	for (int colour = -1; colour < MAX_PLAYERS_IN_GUI; ++colour)
 	{
-		int cellX = (colour + 1) % 7;
-		int cellY = (colour + 1) / 7;
-		addMultiBut(psWScreen, FRONTEND_BOTFORM, FE_MP_PR + colour + 1, FRONTEND_POS7M + cellX * (w + 2) -20, FRONTEND_POS7Y + cellY * (h + 2) - 5, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, colour >= 0 ? colour : MAX_PLAYERS + 1);
+		uint32_t cellX = (colour + 1) % 7;
+		uint32_t cellY = (colour + 1) / 7;
+		auto button = makeMultiBut(FE_MP_PR + colour + 1, w, h, nullptr, IMAGE_PLAYERN, IMAGE_PLAYERX, true, colour >= 0 ? colour : MAX_PLAYERS + 1);
+		if (colour == war_getMPcolour()) {
+			button->setState(WBUT_LOCK);
+		}
+		multiplayerColor->place({cellX}, {cellY}, unitColorMargin.wrap(button));
 	}
-	widgSetButtonState(psWScreen, FE_MP_PR + playercolor + 1, WBUT_LOCK);
-	addTextButton(FRONTEND_COLOUR_MP, FRONTEND_POS7X - 20, FRONTEND_POS7Y, _("Skirmish/Multiplayer"), 0);
+
+	gridBuilder.addRow(
+		colorsMargin.wrap(
+			Alignment(Alignment::Vertical::Top, Alignment::Horizontal::Left).wrap(
+				makeTextButton(FRONTEND_COLOUR_MP, _("Skirmish/Multiplayer"), 0, MINIMUM_GAME_OPTIONS_BUTTON_WIDTH - colorsMargin.left)
+			)
+		),
+		multiplayerColor
+	);
+
+	grid->setGeometry(0, 0, FRONTEND_BUTWIDTH_WIDE, grid->idealHeight());
+
+	auto scrollableList = ScrollableListWidget::make();
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORM_WIDEW - 1, FRONTEND_BOTFORM_WIDEH - FRONTEND_BUTHEIGHT_LIST_SPACER);
+	scrollableList->addItem(grid);
+	widgGetFromID(psWScreen, FRONTEND_BOTFORM)->attach(scrollableList);
 
 	// Quit
 	addMultiBut(psWScreen, FRONTEND_BOTFORM, FRONTEND_QUIT, 10, 10, 30, 29, P_("menu", "Return"), IMAGE_RETURN, IMAGE_RETURN_HI, IMAGE_RETURN_HI);
@@ -2079,29 +2998,10 @@ bool runGameOptionsMenu()
 	case FRONTEND_HYPERLINK:
 		openURLInBrowser(TRANSLATION_URL);
 		break;
-	case FRONTEND_LANGUAGE:
-	case FRONTEND_LANGUAGE_R:
-
-		setNextLanguage(widgGetButtonKey_DEPRECATED(psWScreen) == WKEY_PRIMARY);
-		widgSetString(psWScreen, FRONTEND_LANGUAGE_R, getLanguageName());
-		/* Hack to reset current menu text, which looks fancy. */
-		widgSetString(psWScreen, FRONTEND_SIDETEXT, _("GAME OPTIONS"));
-		widgGetFromID(psWScreen, FRONTEND_QUIT)->setTip(P_("menu", "Return"));
-		widgSetString(psWScreen, FRONTEND_LANGUAGE, _("Language"));
-		widgSetString(psWScreen, FRONTEND_COLOUR, _("Unit Colour:"));
-		widgSetString(psWScreen, FRONTEND_COLOUR_CAM, _("Campaign"));
-		widgSetString(psWScreen, FRONTEND_COLOUR_MP, _("Skirmish/Multiplayer"));
-		widgSetString(psWScreen, FRONTEND_DIFFICULTY, _("Campaign Difficulty"));
-		widgSetString(psWScreen, FRONTEND_CAMERASPEED, _("Camera Speed"));
-		widgSetString(psWScreen, FRONTEND_DIFFICULTY_R, gameOptionsDifficultyString());
-
-		// hack to update translations of AI names and tooltips
-		readAIs();
-		break;
 
 	case FRONTEND_DIFFICULTY:
 	case FRONTEND_DIFFICULTY_R:
-		setDifficultyLevel(seqCycle(getDifficultyLevel(), DL_EASY, 1, DL_INSANE));
+		setDifficultyLevel(seqCycle(getDifficultyLevel(), DL_SUPER_EASY, 1, DL_INSANE));
 		widgSetString(psWScreen, FRONTEND_DIFFICULTY_R, gameOptionsDifficultyString());
 		if (getDifficultyLevel() == DL_INSANE)
 		{
@@ -2110,7 +3010,7 @@ bool runGameOptionsMenu()
 			if (!hasNotificationsWithTag(DIFF_TAG))
 			{
 				WZ_Notification notification;
-				notification.duration = 10 * GAME_TICKS_PER_SEC;;
+				notification.duration = 10 * GAME_TICKS_PER_SEC;
 				notification.contentTitle = _("Insane Difficulty");
 				notification.contentText = _("This difficulty is for very experienced players!");
 				notification.tag = DIFF_TAG;
@@ -2247,6 +3147,65 @@ static std::shared_ptr<WIDGET> makeInactivityMinutesMPDropdown()
 	return Margin(0, -paddingSize).wrap(dropdown);
 }
 
+static std::shared_ptr<WIDGET> makeGameTimeLimitMinutesMPDropdown()
+{
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_GAME_TIME_LIMIT_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * 5);
+	const auto paddingSize = 10;
+
+	std::vector<uint32_t> gameTimeLimitMinutesValues;
+	dropdown->addItem(Margin(0, paddingSize).wrap(makeTextButton(0, _("Off"), 0)));
+	gameTimeLimitMinutesValues.push_back(0);
+
+	auto addGameTimeLimitMinutesRow = [&](uint32_t gameTimeLimitMinutes) {
+		std::string buttonText;
+		if (gameTimeLimitMinutes >= 120)
+		{
+			std::string hoursFloatStr = fmt::format("{:#}", static_cast<float>(gameTimeLimitMinutes) / 60.f);
+			buttonText = astringf(_("%s hours"), hoursFloatStr.c_str());
+		}
+		else
+		{
+			buttonText = astringf(_("%u minutes"), gameTimeLimitMinutes);
+		}
+		auto item = makeTextButton(0, buttonText, 0);
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+		gameTimeLimitMinutesValues.push_back(gameTimeLimitMinutes);
+	};
+
+	for (uint32_t gameTimeLimitMinutes = MIN_MPGAMETIMELIMIT_MINUTES; gameTimeLimitMinutes <= (MIN_MPGAMETIMELIMIT_MINUTES + (15 * 10)); gameTimeLimitMinutes += 15)
+	{
+		addGameTimeLimitMinutesRow(gameTimeLimitMinutes);
+	}
+
+	if (!std::any_of(gameTimeLimitMinutesValues.begin(), gameTimeLimitMinutesValues.end(), [](uint32_t gameTimeLimitMinutes) {
+		return gameTimeLimitMinutes == war_getMPGameTimeLimitMinutes();
+	}))
+	{
+		// add the current value, which must be a custom manual config edit
+		addGameTimeLimitMinutesRow(war_getMPGameTimeLimitMinutes());
+	}
+
+	auto it = std::find(gameTimeLimitMinutesValues.begin(), gameTimeLimitMinutesValues.end(), war_getMPGameTimeLimitMinutes());
+	if (it != gameTimeLimitMinutesValues.end())
+	{
+		dropdown->setSelectedIndex(it - gameTimeLimitMinutesValues.begin());
+	}
+
+	dropdown->setOnChange([gameTimeLimitMinutesValues](DropdownWidget& dropdown) {
+		if (auto selectedIndex = dropdown.getSelectedIndex())
+		{
+			ASSERT_OR_RETURN(, selectedIndex.value() < gameTimeLimitMinutesValues.size(), "Invalid selected index: %zu", selectedIndex.value());
+			uint32_t newGameTimeLimitMinutes = gameTimeLimitMinutesValues[selectedIndex.value()];
+			war_setMPGameTimeLimitMinutes(newGameTimeLimitMinutes);
+			game.gameTimeLimitMinutes = war_getMPGameTimeLimitMinutes();
+		}
+	});
+
+	return Margin(0, -paddingSize).wrap(dropdown);
+}
+
 static std::shared_ptr<WIDGET> makeLagKickDropdown()
 {
 	auto dropdown = std::make_shared<DropdownWidget>();
@@ -2336,9 +3295,55 @@ static std::shared_ptr<WIDGET> makeOpenSpectatorSlotsMPDropdown()
 	return Margin(0, -paddingSize).wrap(dropdown);
 }
 
-char const *multiplayOptionsUPnPString()
+static std::shared_ptr<WIDGET> makePlayerLeaveModeMPDropdown()
 {
-	return NetPlay.isUPNP ? _("On") : _("Off");
+	std::vector<std::tuple<WzString, PLAYER_LEAVE_MODE>> dropDownChoices = {
+		{_("Distribute to Team"), PLAYER_LEAVE_MODE::SPLIT_WITH_TEAM},
+		{_("Destroy (Classic)"), PLAYER_LEAVE_MODE::DESTROY_RESOURCES}
+	};
+
+	size_t currentSettingIdx = 0;
+	auto currValue = war_getMPPlayerLeaveMode();
+	auto it = std::find_if(dropDownChoices.begin(), dropDownChoices.end(), [currValue](const std::tuple<WzString, PLAYER_LEAVE_MODE>& item) -> bool {
+		return std::get<1>(item) == currValue;
+	});
+	if (it != dropDownChoices.end())
+	{
+		currentSettingIdx = it - dropDownChoices.begin();
+	}
+
+	auto dropdown = std::make_shared<DropdownWidget>();
+	dropdown->id = FRONTEND_PLAYER_LEAVE_MODE_DROPDOWN;
+	dropdown->setListHeight(FRONTEND_BUTHEIGHT * std::min<uint32_t>(5, dropDownChoices.size()));
+	const auto paddingSize = 10;
+
+	for (const auto& option : dropDownChoices)
+	{
+		auto item = makeTextButton(0, std::get<0>(option).toUtf8(), 0);
+		dropdown->addItem(Margin(0, paddingSize).wrap(item));
+	}
+
+	dropdown->setSelectedIndex(currentSettingIdx);
+
+	dropdown->setOnChange([dropDownChoices](DropdownWidget& dropdown) {
+		if (auto selectedIndex = dropdown.getSelectedIndex())
+		{
+			ASSERT_OR_RETURN(, selectedIndex.value() < dropDownChoices.size(), "Invalid index");
+			war_setMPPlayerLeaveMode(std::get<1>(dropDownChoices.at(selectedIndex.value())));
+		}
+	});
+
+	return Margin(0, -paddingSize).wrap(dropdown);
+}
+
+char const *multiplayOptionsPortMappingString()
+{
+	return NetPlay.isPortMappingEnabled ? _("On") : _("Off");
+}
+
+char const *multiplayOptionsHostingChatDefaultString()
+{
+	return NETgetDefaultMPHostFreeChatPreference() ? _("Allow All") : _("Quick Chat Only");
 }
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -2363,9 +3368,16 @@ void startMultiplayOptionsMenu()
 	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_GAME_PORT_R, std::to_string(NETgetGameserverPort()), WBUT_DISABLE))); // FUTURE TODO: Make this an input field or similar and allow editing (although reject ports <= 1024)
 	row.start++;
 
-	// Enable UPnP
-	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_UPNP, _("Enable UPnP"), WBUT_SECONDARY)));
-	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_UPNP_R, multiplayOptionsUPnPString(), WBUT_SECONDARY)));
+	// Port Mapping
+	auto portMappingTitle = makeTextButton(FRONTEND_PORT_MAPPING, _("Port Mapping"), WBUT_SECONDARY);
+	portMappingTitle->setTip(_("Use PCP, NAT-PMP, or UPnP to help configure your router / firewall to allow connections while hosting."));
+	grid->place({0}, row, addMargin(portMappingTitle));
+	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_PORT_MAPPING_R, multiplayOptionsPortMappingString(), WBUT_SECONDARY)));
+	row.start++;
+
+	// Chat
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_HOST_CHATDEFAULT, _("Chat"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_HOST_CHATDEFAULT_R, multiplayOptionsHostingChatDefaultString(), WBUT_SECONDARY)));
 	row.start++;
 
 	// Inactivity Kick
@@ -2383,10 +3395,25 @@ void startMultiplayOptionsMenu()
 	grid->place({1, 1, false}, row, addMargin(makeOpenSpectatorSlotsMPDropdown()));
 	row.start++;
 
+	// On Player Leave
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_PLAYER_LEAVE_MODE, _("On Player Leave"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makePlayerLeaveModeMPDropdown()));
+	row.start++;
+
+	// Game Time Limit
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_GAME_TIME_LIMIT, _("Game Time Limit"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeGameTimeLimitMinutesMPDropdown()));
+	row.start++;
+
+	// Enable Autorating lookup
+	grid->place({0}, row, addMargin(makeTextButton(FRONTEND_AUTORATING, _("Enable Rating"), WBUT_SECONDARY)));
+	grid->place({1, 1, false}, row, addMargin(makeTextButton(FRONTEND_AUTORATING_R, getAutoratingEnable()? _("On") : _("Off"), WBUT_SECONDARY)));
+	row.start++;
+
 	grid->setGeometry(0, 0, FRONTEND_BUTWIDTH, grid->idealHeight());
 
 	auto scrollableList = ScrollableListWidget::make();
-	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_POS2Y - 1);
+	scrollableList->setGeometry(0, FRONTEND_POS2Y, FRONTEND_BOTFORMW - 1, FRONTEND_BOTFORMH - FRONTEND_BUTHEIGHT_LIST_SPACER);
 	scrollableList->addItem(grid);
 	parent->attach(scrollableList);
 
@@ -2413,10 +3440,20 @@ bool runMultiplayOptionsMenu()
 
 	switch (id)
 	{
-	case FRONTEND_UPNP:
-	case FRONTEND_UPNP_R:
-		NetPlay.isUPNP = !NetPlay.isUPNP;
-		widgSetString(psWScreen, FRONTEND_UPNP_R, multiplayOptionsUPnPString());
+	case FRONTEND_PORT_MAPPING:
+	case FRONTEND_PORT_MAPPING_R:
+		NetPlay.isPortMappingEnabled = !NetPlay.isPortMappingEnabled;
+		widgSetString(psWScreen, FRONTEND_PORT_MAPPING_R, multiplayOptionsPortMappingString());
+		break;
+	case FRONTEND_HOST_CHATDEFAULT:
+	case FRONTEND_HOST_CHATDEFAULT_R:
+		NETsetDefaultMPHostFreeChatPreference(!NETgetDefaultMPHostFreeChatPreference());
+		widgSetString(psWScreen, FRONTEND_HOST_CHATDEFAULT_R, multiplayOptionsHostingChatDefaultString());
+		break;
+	case FRONTEND_AUTORATING:
+	case FRONTEND_AUTORATING_R:
+		setAutoratingEnable(!getAutoratingEnable());
+		widgSetString(psWScreen, FRONTEND_AUTORATING_R, getAutoratingEnable()? _("On") : _("Off"));
 		break;
 
 	case FRONTEND_QUIT:
@@ -2458,12 +3495,22 @@ static void displayTitleBitmap(WZ_DECL_UNUSED WIDGET *psWidget, WZ_DECL_UNUSED U
 		sstrcat(modListText, getModList().c_str());
 	}
 
+	if (pie_GetVideoBufferWidth() <= 0 || pie_GetVideoBufferHeight() <= 0)
+	{
+		// don't bother drawing when the dimensions are <= 0,0
+		return;
+	}
+
 	assert(psWidget->pUserData != nullptr);
 	TitleBitmapCache& cache = *static_cast<TitleBitmapCache*>(psWidget->pUserData);
 
 	cache.formattedVersionString.setText(version_getFormattedVersionString(), font_regular);
 	cache.modListText.setText(modListText, font_regular);
-	cache.gfxBackend.setText(gfx_api::context::get().getFormattedRendererInfoString(), font_small);
+#if defined(__EMSCRIPTEN__)
+	cache.gfxBackend.setText(WZ_EmscriptenGetBottomRendererSysInfoString(), font_small);
+#else
+	cache.gfxBackend.setText(WzString::fromUtf8(gfx_api::context::get().getFormattedRendererInfoString()), font_small);
+#endif
 
 	cache.formattedVersionString.render(pie_GetVideoBufferWidth() - 9, pie_GetVideoBufferHeight() - 14, WZCOL_GREY, 270.f);
 
@@ -2520,7 +3567,7 @@ static void displayTextAt270(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 	DisplayTextOptionCache& cache = *static_cast<DisplayTextOptionCache*>(psWidget->pUserData);
 
 	// TODO: Only works for single-line (not "formatted text") labels
-	cache.wzText.setText(psLab->getString().toUtf8(), font_large);
+	cache.wzText.setText(psLab->getString(), font_large);
 
 	fx = xOffset + psWidget->x();
 	fy = yOffset + psWidget->y() + cache.wzText.width();
@@ -2542,7 +3589,38 @@ void displayTextOption(WIDGET *psWidget, UDWORD xOffset, UDWORD yOffset)
 	assert(psWidget->pUserData != nullptr);
 	DisplayTextOptionCache& cache = *static_cast<DisplayTextOptionCache*>(psWidget->pUserData);
 
-	cache.wzText.setText(psBut->pText.toUtf8(), psBut->FontID);
+	iV_fonts fontID = cache.wzText.getFontID();
+	if (fontID == font_count || cache.lastWidgetWidth != psBut->width() || cache.wzText.getText() != psBut->pText)
+	{
+		fontID = psBut->FontID;
+	}
+	cache.wzText.setText(psBut->pText, fontID);
+
+	if (cache.wzText.width() > psBut->width())
+	{
+		// text would exceed the bounds of the button area
+		switch (cache.overflowBehavior)
+		{
+			case DisplayTextOptionCache::OverflowBehavior::ShrinkFont:
+				do {
+					if (fontID == font_small || fontID == font_bar || fontID == font_regular || fontID == font_regular_bold)
+					{
+						break;
+					}
+					auto result = iV_ShrinkFont(fontID);
+					if (!result.has_value())
+					{
+						break;
+					}
+					fontID = result.value();
+					cache.wzText.setText(psBut->pText, fontID);
+				} while (cache.wzText.width() > psBut->width());
+				break;
+			default:
+				break;
+		}
+	}
+	cache.lastWidgetWidth = psBut->width();
 
 	if (psBut->isMouseOverWidget()) // if mouse is over text then hilight.
 	{
@@ -2669,16 +3747,26 @@ void addTopForm(bool wide)
 }
 
 // ////////////////////////////////////////////////////////////////////////////
-void addBottomForm()
+void addBottomForm(bool wide)
 {
 	WIDGET *parent = widgGetFromID(psWScreen, FRONTEND_BACKDROP);
 
 	auto botForm = std::make_shared<IntFormAnimated>();
 	parent->attach(botForm);
 	botForm->id = FRONTEND_BOTFORM;
-	botForm->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
-		psWidget->setGeometry(FRONTEND_BOTFORMX, FRONTEND_BOTFORMY, FRONTEND_BOTFORMW, FRONTEND_BOTFORMH);
-	}));
+
+	if (wide)
+	{
+		botForm->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			psWidget->setGeometry(FRONTEND_BOTFORM_WIDEX, FRONTEND_BOTFORM_WIDEY, FRONTEND_BOTFORM_WIDEW, FRONTEND_BOTFORM_WIDEH);
+		}));
+	}
+	else
+	{
+		botForm->setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
+			psWidget->setGeometry(FRONTEND_BOTFORMX, FRONTEND_BOTFORMY, FRONTEND_BOTFORMW, FRONTEND_BOTFORMH);
+		}));
+	}
 }
 
 // ////////////////////////////////////////////////////////////////////////////
@@ -2697,13 +3785,13 @@ void addText(UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt, UDWORD formID
 }
 
 // ////////////////////////////////////////////////////////////////////////////
-W_LABEL *addSideText(const std::shared_ptr<W_SCREEN> &psScreen, UDWORD formId, UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt)
+std::shared_ptr<W_LABEL> addSideText(WIDGET* psParent, UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt)
 {
-	ASSERT_OR_RETURN(nullptr, psScreen != nullptr, "Invalid screen pointer");
+	ASSERT_OR_RETURN(nullptr, psParent != nullptr, "Invalid parent");
 
 	W_LABINIT sLabInit;
 
-	sLabInit.formID = formId;
+	sLabInit.formID = 0;
 	sLabInit.id = id;
 	sLabInit.x = (short) PosX;
 	sLabInit.y = (short) PosY;
@@ -2721,7 +3809,19 @@ W_LABEL *addSideText(const std::shared_ptr<W_SCREEN> &psScreen, UDWORD formId, U
 		psWidget->pUserData = nullptr;
 	};
 
-	return widgAddLabel(psScreen, &sLabInit);
+	auto psLabel = std::make_shared<W_LABEL>(&sLabInit);
+	psLabel->setTransparentToClicks(true);
+	psLabel->setTransparentToMouse(true);
+	psParent->attach(psLabel);
+	return psLabel;
+}
+
+W_LABEL *addSideText(const std::shared_ptr<W_SCREEN> &psScreen, UDWORD formId, UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt)
+{
+	ASSERT_OR_RETURN(nullptr, psScreen != nullptr, "Invalid screen pointer");
+
+	WIDGET *psParent = widgGetFromID(psScreen, formId);
+	return addSideText(psParent, id, PosX, PosY, txt).get();
 }
 
 W_LABEL *addSideText(UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt)
@@ -2730,7 +3830,7 @@ W_LABEL *addSideText(UDWORD id, UDWORD PosX, UDWORD PosY, const char *txt)
 }
 
 // ////////////////////////////////////////////////////////////////////////////
-static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &txt, unsigned int style)
+static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &txt, unsigned int style, optional<unsigned int> minimumWidth)
 {
 	W_BUTINIT sButInit;
 
@@ -2738,9 +3838,11 @@ static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &tx
 	sButInit.id = id;
 
 	// Align
+	sButInit.FontID = font_large;
 	if (!(style & WBUT_TXTCENTRE))
 	{
-		sButInit.width = (short)iV_GetTextWidth(txt.c_str(), font_large);
+		auto textWidth = iV_GetTextWidth(txt.c_str(), sButInit.FontID);
+		sButInit.width = (short)std::max<unsigned int>(minimumWidth.value_or(0), textWidth);
 	}
 	else
 	{
@@ -2754,7 +3856,9 @@ static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &tx
 	}
 
 	sButInit.UserData = (style & WBUT_DISABLE); // store disable state
-	sButInit.pUserData = new DisplayTextOptionCache();
+	auto pUserData = new DisplayTextOptionCache();
+	pUserData->overflowBehavior = DisplayTextOptionCache::OverflowBehavior::ShrinkFont;
+	sButInit.pUserData = pUserData;
 	sButInit.onDelete = [](WIDGET *psWidget) {
 		assert(psWidget->pUserData != nullptr);
 		delete static_cast<DisplayTextOptionCache *>(psWidget->pUserData);
@@ -2763,7 +3867,6 @@ static std::shared_ptr<W_BUTTON> makeTextButton(UDWORD id, const std::string &tx
 
 	sButInit.height = FRONTEND_BUTHEIGHT;
 	sButInit.pDisplay = displayTextOption;
-	sButInit.FontID = font_large;
 	sButInit.pText = txt.c_str();
 
 	auto button = std::make_shared<W_BUTTON>(&sButInit);
@@ -2781,7 +3884,7 @@ static std::shared_ptr<WIDGET> addMargin(std::shared_ptr<WIDGET> widget)
 	return Margin(0, 20).wrap(widget);
 }
 
-void addTextButton(UDWORD id,  UDWORD PosX, UDWORD PosY, const std::string &txt, unsigned int style)
+std::shared_ptr<W_BUTTON> addTextButton(UDWORD id,  UDWORD PosX, UDWORD PosY, const std::string &txt, unsigned int style)
 {
 	auto button = makeTextButton(id, txt, style);
 	if (style & WBUT_TXTCENTRE)
@@ -2796,6 +3899,7 @@ void addTextButton(UDWORD id,  UDWORD PosX, UDWORD PosY, const std::string &txt,
 	WIDGET *parent = widgGetFromID(psWScreen, FRONTEND_BOTFORM);
 	ASSERT(parent != nullptr, "Unable to find FRONTEND_BOTFORM?");
 	parent->attach(button);
+	return button;
 }
 
 W_BUTTON * addSmallTextButton(UDWORD id,  UDWORD PosX, UDWORD PosY, const char *txt, unsigned int style)
@@ -2975,4 +4079,12 @@ void frontendScreenSizeDidChange(int oldWidth, int oldHeight, int newWidth, int 
 	lastProcessedDisplayScale = currentDisplayScale;
 	lastProcessedScreenWidth = newWidth;
 	lastProcessedScreenHeight = newHeight;
+}
+
+// To be called from frontendShutdown(), which for some reason is in init.cpp...
+void frontendIsShuttingDown()
+{
+	std::weak_ptr<IMAGEFILE> pFlagsImagesWeak(pFlagsImages);
+	pFlagsImages.reset();
+	ASSERT(pFlagsImagesWeak.expired(), "A reference to the flags.img IMAGEFILE still exists!");
 }

@@ -10,24 +10,24 @@ set_source_files_properties("${wz2100_autorevision_h_file}" PROPERTIES GENERATED
 # On Windows, configure warzone2100.rc and the .manifest with updated version info
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 	# warzone2100.manifest
-	set(_manifest_template_file "${CMAKE_SOURCE_DIR}/win32/warzone2100.manifest.in")
+	set(_manifest_template_file "${CMAKE_SOURCE_DIR}/platforms/windows/warzone2100.manifest.in")
 	set(_manifest_output_file "${CMAKE_CURRENT_BINARY_DIR}/warzone2100.manifest")
 	add_custom_command(
 		OUTPUT "${_manifest_output_file}"
-		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_manifest_template_file} -DOUTPUT_FILE=${_manifest_output_file} -P ${CMAKE_SOURCE_DIR}/win32/autorevision_rc.cmake
+		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_manifest_template_file} -DOUTPUT_FILE=${_manifest_output_file} -P ${CMAKE_SOURCE_DIR}/platforms/windows/autorevision_rc.cmake
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-		DEPENDS "${_manifest_template_file}" "${wz2100_autorevision_cache_file}"
+		DEPENDS "${_manifest_template_file}" "${wz2100_autorevision_cache_file}" "${CMAKE_SOURCE_DIR}/platforms/windows/autorevision_rc.cmake"
 		VERBATIM
 	)
 
 	# warzone2100.rc
-	set(_rc_template_file "${CMAKE_SOURCE_DIR}/win32/warzone2100.rc.in")
+	set(_rc_template_file "${CMAKE_SOURCE_DIR}/platforms/windows/warzone2100.rc.in")
 	set(_rc_output_file "${CMAKE_CURRENT_BINARY_DIR}/warzone2100.rc")
 	add_custom_command(
 		OUTPUT "${_rc_output_file}"
-		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_rc_template_file} -DOUTPUT_FILE=${_rc_output_file} -P ${CMAKE_SOURCE_DIR}/win32/autorevision_rc.cmake
+		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_rc_template_file} -DOUTPUT_FILE=${_rc_output_file} -P ${CMAKE_SOURCE_DIR}/platforms/windows/autorevision_rc.cmake
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-		DEPENDS "${_rc_template_file}" "${wz2100_autorevision_cache_file}" "${_manifest_output_file}"
+		DEPENDS "${_rc_template_file}" "${wz2100_autorevision_cache_file}" "${_manifest_output_file}" "${CMAKE_SOURCE_DIR}/platforms/windows/autorevision_rc.cmake"
 		VERBATIM
 	)
 
@@ -42,13 +42,13 @@ endif()
 
 # On macOS, generate the Info.plist file with updated version info at *build-time*
 if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-	set(_info_plist_template_file "${PROJECT_SOURCE_DIR}/macosx/Resources/Warzone-Info.plist.in")
+	set(_info_plist_template_file "${PROJECT_SOURCE_DIR}/platforms/macos/Resources/Warzone-Info.plist.in")
 	set(_info_plist_output_file "${CMAKE_CURRENT_BINARY_DIR}/Warzone-Info.plist")
 	add_custom_command(
 		OUTPUT "${_info_plist_output_file}"
-		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_info_plist_template_file} -DOUTPUT_FILE=${_info_plist_output_file} -P ${CMAKE_SOURCE_DIR}/macosx/cmake/autorevision_infoplist.cmake
+		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_info_plist_template_file} -DOUTPUT_FILE=${_info_plist_output_file} -P ${CMAKE_SOURCE_DIR}/platforms/macos/cmake/autorevision_infoplist.cmake
 		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
-		DEPENDS "${_info_plist_template_file}" "${wz2100_autorevision_cache_file}" "${CMAKE_SOURCE_DIR}/macosx/cmake/autorevision_infoplist.cmake"
+		DEPENDS "${_info_plist_template_file}" "${wz2100_autorevision_cache_file}" "${CMAKE_SOURCE_DIR}/platforms/macos/cmake/autorevision_infoplist.cmake"
 		VERBATIM
 	)
 
@@ -61,6 +61,26 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 
 endif()
 
+# On Emscripten, generate the extern-postjs.js file with updated version info at *build-time*
+if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+	set(_extern_postjs_template_file "${PROJECT_SOURCE_DIR}/platforms/emscripten/extern-postjs.js.in")
+	set(_extern_postjs_output_file "${CMAKE_CURRENT_BINARY_DIR}/extern-postjs.js")
+	add_custom_command(
+		OUTPUT "${_extern_postjs_output_file}"
+		COMMAND ${CMAKE_COMMAND} -DCACHEFILE=${wz2100_autorevision_cache_file} -DPROJECT_ROOT=${PROJECT_SOURCE_DIR} -DTEMPLATE_FILE=${_extern_postjs_template_file} -DOUTPUT_FILE=${_extern_postjs_output_file} -P ${CMAKE_SOURCE_DIR}/platforms/emscripten/cmake/autorevision_externpostjs.cmake
+		WORKING_DIRECTORY "${CMAKE_SOURCE_DIR}"
+		DEPENDS "${_extern_postjs_template_file}" "${wz2100_autorevision_cache_file}" "${CMAKE_SOURCE_DIR}/platforms/emscripten/cmake/autorevision_externpostjs.cmake"
+		VERBATIM
+	)
+
+	add_custom_target(autorevision_externpostjs ALL
+		DEPENDS
+			"${_extern_postjs_output_file}"
+	)
+	set_property(TARGET autorevision_externpostjs PROPERTY FOLDER "_WZBuildProcessTargets")
+	add_dependencies(autorevision_externpostjs autorevision) # Ensure ordering and non-concurrency
+endif()
+
 ############################
 # Main Executable
 
@@ -68,8 +88,8 @@ if(ENABLE_NLS)
 	find_package (Intl REQUIRED)
 endif()
 
-file(GLOB HEADERS "*.h" "3rdparty/*.h" "titleui/*.h" "hci/*.h" "input/*.h")
-file(GLOB SRC "*.cpp" "3rdparty/*.cpp" "titleui/*.cpp" "hci/*.cpp" "input/*.cpp")
+file(GLOB HEADERS "*.h" "3rdparty/*.h" "titleui/*.h" "titleui/*/*.h" "hci/*.h" "input/*.h" "screens/*.h")
+file(GLOB SRC "*.cpp" "3rdparty/*.cpp" "titleui/*.cpp" "titleui/*/*.cpp" "hci/*.cpp" "input/*.cpp" "screens/*.cpp")
 
 set(_additionalSourceFiles)
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
@@ -80,12 +100,15 @@ add_executable(warzone2100 ${HEADERS} ${SRC} "${wz2100_autorevision_h_file}" ${_
 include(WZTargetConfiguration)
 WZ_TARGET_CONFIGURATION(warzone2100)
 target_compile_definitions(warzone2100 PRIVATE "YY_NO_UNISTD_H")
-target_compile_definitions(warzone2100 PRIVATE "JSON_USE_IMPLICIT_CONVERSIONS=0")
 SET_TARGET_PROPERTIES(warzone2100 PROPERTIES RUNTIME_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}")
 SET_TARGET_PROPERTIES(warzone2100 PROPERTIES RUNTIME_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}")
 SET_TARGET_PROPERTIES(warzone2100 PROPERTIES LIBRARY_OUTPUT_DIRECTORY_RELEASE "${CMAKE_CURRENT_BINARY_DIR}")
 SET_TARGET_PROPERTIES(warzone2100 PROPERTIES LIBRARY_OUTPUT_DIRECTORY_DEBUG "${CMAKE_CURRENT_BINARY_DIR}")
-SET_TARGET_PROPERTIES(warzone2100 PROPERTIES OUTPUT_NAME "warzone2100${WZ_OUTPUT_NAME_SUFFIX}")
+set(WZ_OUTPUT_BINARY_SUFFIX "${WZ_OUTPUT_NAME_SUFFIX}")
+if (WZ_SKIP_OUTPUT_NAME_SUFFIX_ON_BINARY)
+	unset(WZ_OUTPUT_BINARY_SUFFIX)
+endif()
+SET_TARGET_PROPERTIES(warzone2100 PROPERTIES OUTPUT_NAME "warzone2100${WZ_OUTPUT_BINARY_SUFFIX}")
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 	# Build warzone exe as a Windows app (not a console app)
@@ -108,15 +131,26 @@ if(ENABLE_NLS)
 	target_link_libraries(warzone2100 ${Intl_LIBRARIES})
 endif()
 
+target_link_libraries(warzone2100 nlohmann_json)
+target_link_libraries(warzone2100 optional-lite)
 target_link_libraries(warzone2100 quickjs)
+target_link_libraries(warzone2100 inih)
 
-include(IncludeFindCurl)
-target_link_libraries(warzone2100 CURL::libcurl)
+if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+	# Exclude CURL implementation, Use Fetch API for Emscripten
+else()
+	include(IncludeFindCurl)
+	target_link_libraries(warzone2100 CURL::libcurl)
+endif()
 target_link_libraries(warzone2100 re2::re2)
 
 find_package(SQLite3 3.14 REQUIRED)
 target_link_libraries(warzone2100 SQLite::SQLite3)
 target_link_libraries(warzone2100 SQLiteCpp)
+
+if (WZ_PROFILING_NVTX)
+	target_link_libraries(warzone2100 nvtx3-cpp)
+endif()
 
 set(_curl_gnutls_thread_safe_fix FALSE)
 if (DEFINED CURL_GNUTLS_REQUIRES_CALLBACKS)
@@ -148,7 +182,7 @@ if (DEFINED CURL_OPENSSL_REQUIRES_CALLBACKS)
 	set(_curl_has_thread_safe_backend FALSE)
 	foreach(_backend ${CURL_SUPPORTED_SSL_BACKENDS})
 		# determine if there are any non-OpenSSL, thread-safe backends enabled
-		if (NOT _backend STREQUAL "OpenSSL")
+		if (NOT _backend MATCHES "^OpenSSL.*")
 			if (_backend STREQUAL "GnuTLS" AND _curl_gnutls_thread_safe_fix)
 				set(_curl_has_thread_safe_backend TRUE)
 			else()
@@ -172,14 +206,14 @@ if (DEFINED CURL_OPENSSL_REQUIRES_CALLBACKS)
 		message(STATUS "Ignoring cURL OpenSSL backend, as other thread-safe backend(s) exist")
 	endif()
 endif()
-if (NOT DEFINED CURL_SUPPORTED_SSL_BACKENDS)
+if (NOT DEFINED CURL_SUPPORTED_SSL_BACKENDS AND NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
 	if (NOT VCPKG_TOOLCHAIN) # ignore warning when using vcpkg
 		message(WARNING "Could not determine cURL's SSL/TLS backends; if cURL is built with OpenSSL < 1.1.0 or GnuTLS < 2.11.0, this may result in thread-safety issues")
 	endif()
 endif()
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-    target_link_libraries(warzone2100 ws2_32 iphlpapi shlwapi ole32)
+    target_link_libraries(warzone2100 ws2_32 iphlpapi shlwapi ole32 psapi)
 endif()
 
 if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQUAL "Clang")
@@ -189,23 +223,27 @@ if("${CMAKE_CXX_COMPILER_ID}" STREQUAL "GNU" OR "${CMAKE_CXX_COMPILER_ID}" STREQ
   endif()
 endif()
 
+add_subdirectory(integrations)
+
 if(ENABLE_DISCORD)
-	if (TARGET discord-rpc)
-		target_include_directories(warzone2100 PRIVATE "${CMAKE_SOURCE_DIR}/3rdparty/discord-rpc/include")
-		target_link_libraries(warzone2100 discord-rpc)
-		target_sources(warzone2100 PRIVATE "integrations/wzdiscordrpc.h" "integrations/wzdiscordrpc.cpp")
-		target_compile_definitions(warzone2100 PRIVATE "ENABLE_DISCORD")
+	if (TARGET discord-rpc AND TARGET wz-discord-integration)
+		target_link_libraries(warzone2100 wz-discord-integration)
 	else()
-		message(WARNING "Missing target: discord-rpc")
+		if (NOT TARGET discord-rpc)
+			message(WARNING "Missing target: discord-rpc")
+		endif()
+		if (NOT TARGET wz-discord-integration)
+			message(WARNING "Missing target: wz-discord-integration")
+		endif()
 	endif()
 endif()
 
 # Dependencies
 add_dependencies(warzone2100 data)
-if(TARGET wz2100_doc)
+if(ENABLE_DOCS AND TARGET wz2100_doc)
 	add_dependencies(warzone2100 wz2100_doc)
 endif()
-if(TARGET translations)
+if(ENABLE_NLS AND TARGET translations)
 	add_dependencies(warzone2100 translations)
 endif()
 
@@ -215,6 +253,151 @@ endif()
 # To change the install destination at configure-time, please change the value of CMAKE_INSTALL_BINDIR
 # (WZ_APP_INSTALL_DEST is for the platform / generator-specific overrides *in* this file)
 set(WZ_APP_INSTALL_DEST "${CMAKE_INSTALL_BINDIR}")
+
+#######################
+# Emscripten Build Config
+
+if(CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+
+	# WZ requires WebGL 2
+	target_link_options(warzone2100 PRIVATE "SHELL:-s MIN_WEBGL_VERSION=2")
+	target_link_options(warzone2100 PRIVATE "SHELL:-s MAX_WEBGL_VERSION=2")
+
+	target_link_options(warzone2100 PRIVATE "SHELL:-s FETCH=1")
+	target_link_options(warzone2100 PRIVATE "SHELL:-s WASM_BIGINT")
+
+	target_link_options(warzone2100 PRIVATE "SHELL:-s ENVIRONMENT=web,worker") # Worker must also be enabled because multithreading is enabled
+
+	target_link_options(warzone2100 PRIVATE "SHELL:-s MINIFY_HTML=0") # Disable MINIFY_HTML
+
+	# Stack and memory usage
+	target_link_options(warzone2100 PRIVATE "SHELL:-s TOTAL_STACK=10485760")
+	target_link_options(warzone2100 PRIVATE "SHELL:-s INITIAL_MEMORY=268435456") # 256 MB
+	target_link_options(warzone2100 PRIVATE "SHELL:-s ALLOW_MEMORY_GROWTH=1")
+	# NOTE: WZ's shell.html handles intelligently detecting and picking a maximum for the WebAssembly.Memory request
+
+#	target_link_options(warzone2100 PRIVATE "SHELL:-s GL_ASSERTIONS=1") # Useful for debugging, but impacts performance
+#	target_link_options(warzone2100 PRIVATE "SHELL:-s LZ4=1") # LZ4 can't be used while also supporting gettext translations (no support for mmap in LZ4 filesystem backend)
+	#target_link_options(warzone2100 PRIVATE "SHELL:-s FULL_ES3=1")
+	target_link_options(warzone2100 PRIVATE "SHELL:-s PTHREAD_POOL_SIZE=8")
+
+	# Needed for SDL2
+	if ("${EMSCRIPTEN_VERSION}" VERSION_GREATER 3.1.50)
+		target_link_options(warzone2100 PRIVATE "SHELL:-s GL_ENABLE_GET_PROC_ADDRESS=1")
+	endif()
+
+	# Display more information on linking issues
+	target_link_options(warzone2100 PRIVATE "SHELL:-s LLD_REPORT_UNDEFINED")
+
+	# Offscreen canvas and proxy to pthread support
+	# - not currently supported - seems to lead to eventual freezes in Firefox and flickering in Safari
+	# target_link_options(warzone2100 PRIVATE "SHELL:-s PROXY_TO_PTHREAD=1")
+	# target_link_options(warzone2100 PRIVATE "SHELL:-s OFFSCREENCANVAS_SUPPORT=1")
+
+	target_link_options(warzone2100 PRIVATE "SHELL:-lidbfs.js") # Explicitly include IDBFS, see: https://github.com/emscripten-core/emscripten/issues/9406
+
+	target_link_options(warzone2100 PRIVATE "SHELL:--shell-file ${PROJECT_SOURCE_DIR}/platforms/emscripten/shell.html")
+	target_link_options(warzone2100 PRIVATE "SHELL:--pre-js ${PROJECT_SOURCE_DIR}/platforms/emscripten/prejs.js")
+	target_link_options(warzone2100 PRIVATE "SHELL:--post-js ${PROJECT_SOURCE_DIR}/platforms/emscripten/postjs.js")
+
+	# Autorevision extern-postjs
+	add_dependencies(warzone2100 autorevision autorevision_externpostjs)
+	target_link_options(warzone2100 PRIVATE "SHELL:--extern-post-js ${CMAKE_CURRENT_BINARY_DIR}/extern-postjs.js")
+
+	target_link_options(warzone2100 PRIVATE "SHELL:-s MODULARIZE")
+	target_link_options(warzone2100 PRIVATE "SHELL:-s EXPORT_NAME=createWZModule")
+	target_link_options(warzone2100 PRIVATE "SHELL:-s EXIT_RUNTIME")
+
+	# Bundle core data files
+	foreach(_data_file ${DATA_FILES})
+		get_filename_component(_foldername "${_data_file}" NAME_WE)
+		message(STATUS "COPYING DATA: ${_foldername}")
+		target_link_options(warzone2100 PRIVATE "SHELL:--preload-file ${_data_file}@/data/${_foldername}/")
+	endforeach()
+
+	# Bundle needed base fonts
+	foreach(_font_file ${DATA_FONTS})
+		get_filename_component(_fontname "${_font_file}" NAME)
+		message(STATUS "COPYING FONT FILE: ${_fontname} (from: ${_font_file})")
+		target_link_options(warzone2100 PRIVATE "SHELL:--preload-file ${_font_file}@/data/fonts/")
+	endforeach()
+
+	# Bundle built-in mods
+	foreach(_mod_file ${DATA_MODS_FILES})
+		file(RELATIVE_PATH _mods_file_relative_path "${DATA_MODS_BASE_DIR}" "${_mod_file}")
+		get_filename_component(_mods_file_subdir_path "${_mods_file_relative_path}" DIRECTORY)
+		message(STATUS "COPYING MOD FILE: mods/${_mods_file_relative_path}")
+		target_link_options(warzone2100 PRIVATE "SHELL:--preload-file ${_mod_file}@/data/mods/${_mods_file_subdir_path}/")
+	endforeach()
+
+	# Bundle the translations
+	if(ENABLE_NLS AND TARGET translations AND DEFINED wz2100_translations_LOCALE_FOLDER)
+		if (NOT WZ_LOCALEDIR_ISABSOLUTE)
+			message(FATAL_ERROR "Expected absolute path for WZ_LOCALEDIR: ${WZ_LOCALEDIR}")
+		endif()
+		target_link_options(warzone2100 PRIVATE "SHELL:--preload-file ${wz2100_translations_LOCALE_FOLDER}@${WZ_LOCALEDIR}/")
+	endif()
+
+	# Cache preload data in browser (if possible)
+	target_link_options(warzone2100 PRIVATE "SHELL:--use-preload-cache")
+
+	# Add dependencies on optional packages (if available)
+	if (TARGET data_music_empackage)
+		add_dependencies(warzone2100 data_music_empackage)
+	else()
+		message(WARNING "Missing data_music package - Emscripten build will not ship with music")
+	endif()
+	if (TARGET data_terrain_overrides_classic_packaging)
+		add_dependencies(warzone2100 data_terrain_overrides_classic_packaging)
+	else()
+		message(WARNING "Missing data_terrain_overrides_classic package - Emscripten build will not ship with classic terrain overrides")
+	endif()
+
+	# Install the app files directly in the destination root
+	set(WZ_APP_INSTALL_DEST ".")
+
+	# Rename output warzone2100.html -> index.html
+	add_custom_command(TARGET warzone2100 POST_BUILD
+		COMMAND ${CMAKE_COMMAND} -E rename "$<TARGET_FILE:warzone2100>" "$<TARGET_FILE_DIR:warzone2100>/index.html"
+		VERBATIM)
+
+	# Copy additional (optional) file packages to build dir to allow direct-running
+	foreach(_empackage_dir IN LISTS DATA_ADDITIONAL_EMPACKAGE_DIRS)
+		file(RELATIVE_PATH _empackage_dir_subdir_path "${DATA_ADDITIONAL_EMPACKAGE_BASEDIR}" "${_empackage_dir}")
+		add_custom_command(TARGET warzone2100 POST_BUILD
+			COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different "${_empackage_dir}" "$<TARGET_FILE_DIR:warzone2100>/pkg/${_empackage_dir_subdir_path}"
+			VERBATIM)
+	endforeach()
+
+	# If workbox-cli is available, generate a proper service worker
+	set(GENERATED_SERVICE_WORKER FALSE)
+	find_package(WorkboxCLI)
+	if (WorkboxCLI_FOUND)
+		add_custom_target(generate_service_worker ALL
+			COMMAND ${CMAKE_COMMAND} -P "${CMAKE_SOURCE_DIR}/platforms/emscripten/cmake/WorkboxRemoveOldFiles.cmake"
+			COMMAND ${WorkboxCLI_COMMAND} generateSW "${CMAKE_SOURCE_DIR}/platforms/emscripten/wz-workbox-config.js"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+			BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/service-worker.js"
+			VERBATIM
+		)
+		add_dependencies(generate_service_worker warzone2100)
+		set(GENERATED_SERVICE_WORKER TRUE)
+	endif()
+	# Otherwise, copy the no-op-service-worker.js -> service-worker.js
+	if (NOT GENERATED_SERVICE_WORKER)
+		message(WARNING "workbox-cli is not available - will use a no-op service worker")
+		# configure_file("${CMAKE_SOURCE_DIR}/platforms/emscripten/no-op-service-worker.js" "${CMAKE_CURRENT_BINARY_DIR}/service-worker.js" COPYONLY)
+		add_custom_target(generate_service_worker ALL
+			COMMAND ${CMAKE_COMMAND} -E copy_if_different "${CMAKE_SOURCE_DIR}/platforms/emscripten/no-op-service-worker.js" "${CMAKE_CURRENT_BINARY_DIR}/service-worker.js"
+			WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
+			DEPENDS "${CMAKE_SOURCE_DIR}/platforms/emscripten/no-op-service-worker.js"
+			BYPRODUCTS "${CMAKE_CURRENT_BINARY_DIR}/service-worker.js"
+			VERBATIM
+		)
+		add_dependencies(generate_service_worker warzone2100)
+	endif()
+
+endif()
 
 #######################
 # macOS Build Config
@@ -279,7 +462,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 		# (To verify that the CMake Xcode generator does not stomp on the above attempt to manually set the INFOPLIST_FILE)
 		add_custom_command(TARGET warzone2100
 			PRE_BUILD
-			COMMAND ${CMAKE_COMMAND} -DNAME=INFOPLIST_FILE -DEXPECTED_VALUE=${CMAKE_CURRENT_BINARY_DIR}/Warzone-Info.plist -P ${CMAKE_SOURCE_DIR}/macosx/cmake/check_env.cmake
+			COMMAND ${CMAKE_COMMAND} -DNAME=INFOPLIST_FILE -DEXPECTED_VALUE=${CMAKE_CURRENT_BINARY_DIR}/Warzone-Info.plist -P ${CMAKE_SOURCE_DIR}/platforms/macos/cmake/check_env.cmake
 			VERBATIM
 		)
 	else()
@@ -288,7 +471,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 	endif()
 
 	# Add the .entitlements file
-	set(_wz_entitlements_file "${CMAKE_CURRENT_SOURCE_DIR}/../macosx/Resources/Warzone.entitlements")
+	set(_wz_entitlements_file "${CMAKE_CURRENT_SOURCE_DIR}/../platforms/macos/Resources/Warzone.entitlements")
 	set_source_files_properties(
 		${_wz_entitlements_file} PROPERTIES
 		XCODE_LAST_KNOWN_FILE_TYPE "text.plist.entitlements"
@@ -312,6 +495,12 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 	set_property(
 		SOURCE ${DATA_FILES}
 		PROPERTY MACOSX_PACKAGE_LOCATION "Resources/data")
+	set_property(
+		SOURCE ${DATA_TERRAIN_OVERRIDES_FILES}
+		PROPERTY MACOSX_PACKAGE_LOCATION "Resources/data/terrain_overrides")
+	set_property(
+		SOURCE ${DATA_FONTS}
+		PROPERTY MACOSX_PACKAGE_LOCATION "Resources/data/fonts")
 	foreach(_music_file ${DATA_MUSIC_FILES})
 		file(RELATIVE_PATH _music_file_relative_path "${DATA_MUSIC_BASE_SOURCEDIR}" "${_music_file}")
 		get_filename_component(_music_file_subdir_path "${_music_file_relative_path}" DIRECTORY)
@@ -319,15 +508,23 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 			SOURCE ${_music_file}
 			PROPERTY MACOSX_PACKAGE_LOCATION "Resources/data/music/${_music_file_subdir_path}")
 	endforeach()
+	foreach(_mod_file ${DATA_MODS_FILES})
+		file(RELATIVE_PATH _mods_file_relative_path "${DATA_MODS_BASE_DIR}" "${_mod_file}")
+		get_filename_component(_mods_file_subdir_path "${_mods_file_relative_path}" DIRECTORY)
+		set_property(
+			SOURCE ${_mod_file}
+			PROPERTY MACOSX_PACKAGE_LOCATION "Resources/data/mods/${_mods_file_subdir_path}")
+	endforeach()
+
 	set_source_files_properties(
-		${DATA_FILES} ${DATA_MUSIC_FILES} PROPERTIES
+		${DATA_FILES} ${DATA_TERRAIN_OVERRIDES_FILES} ${DATA_FONTS} ${DATA_MUSIC_FILES} ${DATA_MODS_FILES} PROPERTIES
 		GENERATED TRUE
 		XCODE_LAST_KNOWN_FILE_TYPE "file"
 	)
-	target_sources(warzone2100 PRIVATE ${DATA_FILES} ${DATA_MUSIC_FILES})
+	target_sources(warzone2100 PRIVATE ${DATA_FILES} ${DATA_TERRAIN_OVERRIDES_FILES} ${DATA_FONTS} ${DATA_MUSIC_FILES} ${DATA_MODS_FILES})
 
 	# Add the icon
-	set(_macos_app_icon "${CMAKE_CURRENT_SOURCE_DIR}/../macosx/Resources/Warzone.icns")
+	set(_macos_app_icon "${CMAKE_CURRENT_SOURCE_DIR}/../platforms/macos/Resources/Warzone.icns")
 	set_source_files_properties(
 		${_macos_app_icon} PROPERTIES
 		MACOSX_PACKAGE_LOCATION "Resources"
@@ -335,17 +532,6 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 	)
 	target_sources(warzone2100 PRIVATE ${_macos_app_icon})
 	SET_TARGET_PROPERTIES(warzone2100 PROPERTIES MACOSX_BUNDLE_ICON_FILE "Warzone.icns")
-
-	# Bundle the fonts
-	set_property(
-		SOURCE ${wz2100_fonts_FILES}
-		PROPERTY MACOSX_PACKAGE_LOCATION "Resources/Fonts")
-	set_source_files_properties(
-		${wz2100_fonts_FILES} PROPERTIES
-		GENERATED TRUE
-		XCODE_LAST_KNOWN_FILE_TYPE "file"
-	)
-	target_sources(warzone2100 PRIVATE ${wz2100_fonts_FILES})
 
 	# Bundle the translations
 	if(ENABLE_NLS)
@@ -402,6 +588,17 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 		XCODE_ATTRIBUTE_DEPLOYMENT_POSTPROCESSING[variant=MinSizeRel] YES
 		XCODE_ATTRIBUTE_DEPLOYMENT_POSTPROCESSING[variant=Release] YES
 	)
+
+	# Bundle the crashpad_handler (if enabled)
+	if(TARGET crashpad_handler)
+		message(FATAL_ERROR "crashpad_handler is not supported for macOS builds (it does not support sandboxed apps)")
+		# But if we *could* use it, we'd bundle it as follows:
+		# Use a post-build step to copy it to the executables folder in the app bundle
+		#add_custom_command(TARGET warzone2100 POST_BUILD
+		#	COMMAND ${CMAKE_COMMAND} -E copy_if_different
+		#	$<TARGET_FILE:crashpad_handler> $<TARGET_FILE_DIR:warzone2100>
+		#)
+	endif()
 
 	if(WZ_ENABLE_BACKEND_VULKAN)
 		# Vulkan / MoltenVK
@@ -520,14 +717,19 @@ set_target_properties(warzone2100 PROPERTIES
 INCLUDE(AddTargetLinkFlagsIfSupported)
 
 if(CMAKE_SYSTEM_NAME MATCHES "Windows")
-    # Enable Data Execution Prevention and Address Space Layout Randomization
+	# Enable Data Execution Prevention and Address Space Layout Randomization
 
-	ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "/NXCOMPAT" CACHED_RESULT_NAME LINK_FLAG_SLASH_NXCOMPAT_SUPPORTED)
-	ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,--nxcompat" CACHED_RESULT_NAME LINK_FLAG_WL_NXCOMPAT_SUPPORTED)
-	ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "/DYNAMICBASE" CACHED_RESULT_NAME LINK_FLAG_SLASH_DYNAMICBASE_SUPPORTED)
-	ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,--dynamicbase" CACHED_RESULT_NAME LINK_FLAG_WL_DYNAMICBASE_SUPPORTED)
-	if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR CMAKE_SIZEOF_VOID_P GREATER 8)
-		ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,--high-entropy-va" CACHED_RESULT_NAME LINK_FLAG_WL_HIGHENTROPYVA_SUPPORTED)
+	if(MSVC)
+		ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "/NXCOMPAT" CACHED_RESULT_NAME LINK_FLAG_SLASH_NXCOMPAT_SUPPORTED)
+		ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "/DYNAMICBASE" CACHED_RESULT_NAME LINK_FLAG_SLASH_DYNAMICBASE_SUPPORTED)
+	endif()
+
+	if(NOT MSVC)
+		ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,--nxcompat" CACHED_RESULT_NAME LINK_FLAG_WL_NXCOMPAT_SUPPORTED)
+		ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,--dynamicbase" CACHED_RESULT_NAME LINK_FLAG_WL_DYNAMICBASE_SUPPORTED)
+		if(CMAKE_SIZEOF_VOID_P EQUAL 8 OR CMAKE_SIZEOF_VOID_P GREATER 8)
+			ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,--high-entropy-va" CACHED_RESULT_NAME LINK_FLAG_WL_HIGHENTROPYVA_SUPPORTED)
+		endif()
 	endif()
 
 	if(MINGW)
@@ -558,7 +760,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 	endif()
 endif()
 
-if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+if(NOT CMAKE_SYSTEM_NAME MATCHES "(Darwin|Emscripten)" AND NOT MSVC)
 	# Ensure noexecstack
 	ADD_TARGET_LINK_FLAGS_IF_SUPPORTED(TARGET warzone2100 LINK_FLAGS "-Wl,-z,noexecstack" CACHED_RESULT_NAME LINK_FLAG_WL_Z_NOEXECSTACK_SUPPORTED)
 	# Enable RELRO (if supported)
@@ -573,54 +775,124 @@ if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
 endif()
 
 #######################
-# Supporting google-breakpad tools for processing minidumps
-
-if(CMAKE_SYSTEM_NAME MATCHES "Windows" AND CMAKE_HOST_SYSTEM_NAME MATCHES "Windows" AND WZ_WIN_HAS_PDB)
-	get_target_property(_mainexename warzone2100 OUTPUT_NAME)
-	if(_mainexename)
-		# Find dump_syms.exe
-		find_program(DUMP_SYMS dump_syms HINTS "${CMAKE_BINARY_DIR}" "${PROJECT_SOURCE_DIR}")
-		if(DUMP_SYMS)
-			# Generate a Breakpad .sym file
-			install(CODE "
-				set(DUMP_SYMS \"${DUMP_SYMS}\")
-				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: Running dump_syms: \${DUMP_SYMS}\")
-
-				# Generate the .sym file from the .pdb
-				set(_outputDirectory \"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}\")
-				set(_outputFilepath \"\${_outputDirectory}/${_mainexename}.sym\")
-				execute_process(COMMAND \${CMAKE_COMMAND} -E make_directory \"\${_outputDirectory}\")
-				execute_process(COMMAND \"\${DUMP_SYMS}\" \"${CMAKE_CURRENT_BINARY_DIR}/${_mainexename}.pdb\"
-								OUTPUT_FILE \"\${_outputFilepath}\"
-								RESULT_VARIABLE _dumpsyms_result)
-				if(_dumpsyms_result EQUAL 0 AND EXISTS \"\${_outputFilepath}\")
-					execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: Generated a Breakpad .sym file from .pdb\")
-				else()
-					execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: WARNING: Failed to generate a Breakpad .sym file from .pdb (exit code: \${_dumpsyms_result})\")
-				endif()
-			" COMPONENT DebugSymbols)
-		else()
-			message( WARNING "Could not find dump_syms.exe. Unable to generate a Breakpad .sym file from .pdb" )
-		endif()
-	else()
-		message( WARNING "Unable to get OUTPUT_NAME from warzone2100 target" )
-	endif()
-endif()
-
 # Support crashpad sentry backend - requires installation of helper binary to handle crashes
+
 if(TARGET crashpad_handler)
-	if(CMAKE_SYSTEM_NAME MATCHES "Darwin")
-		message(FATAL_ERROR "crashpad_handler is not currently supported for macOS builds")
+	if(NOT CMAKE_SYSTEM_NAME MATCHES "Darwin")
+		install(TARGETS crashpad_handler COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
+		if(WIN32 AND TARGET crashpad_wer)
+			# On Windows, also install the crashpad_wer.dll (if built with support)
+			install(TARGETS crashpad_wer RUNTIME COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
+		endif()
 	endif()
-	install(TARGETS crashpad_handler COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
 endif()
 
 #######################
 # Install
-install(TARGETS warzone2100 COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
 
-# For Portable packages only, copy the ".portable" file that triggers portable mode (Windows-only)
-install(FILES "${CMAKE_SOURCE_DIR}/pkg/portable.in" COMPONENT PortableConfig DESTINATION "${WZ_APP_INSTALL_DEST}" RENAME ".portable")
+if(NOT CMAKE_SYSTEM_NAME MATCHES "Emscripten")
+
+	# Executable
+	install(TARGETS warzone2100 COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}")
+
+	# For Portable packages only, copy the ".portable" file that triggers portable mode (Windows-only)
+	install(FILES "${CMAKE_SOURCE_DIR}/pkg/portable.in" COMPONENT PortableConfig DESTINATION "${WZ_APP_INSTALL_DEST}" RENAME ".portable" EXCLUDE_FROM_ALL)
+
+else()
+
+	# For Emscripten: install the generated files
+	install(FILES
+			"$<TARGET_FILE_DIR:warzone2100>/index.html"
+			COMPONENT Core
+			DESTINATION "${WZ_APP_INSTALL_DEST}"
+			RENAME "index.html")
+	install(FILES
+			"$<TARGET_FILE_DIR:warzone2100>/warzone2100.js"
+			"$<TARGET_FILE_DIR:warzone2100>/warzone2100.wasm"
+			"$<TARGET_FILE_DIR:warzone2100>/warzone2100.data"
+			COMPONENT Core
+			DESTINATION "${WZ_APP_INSTALL_DEST}")
+	if ("${EMSCRIPTEN_VERSION}" VERSION_LESS 3.1.58)
+		# Versions prior to 3.1.58 generated a separate .worker.js file
+		install(FILES
+			"$<TARGET_FILE_DIR:warzone2100>/warzone2100.worker.js"
+			COMPONENT Core
+			DESTINATION "${WZ_APP_INSTALL_DEST}")
+	endif()
+
+	# Install manifest file
+	configure_file("${CMAKE_SOURCE_DIR}/platforms/emscripten/manifest.json" "${CMAKE_CURRENT_BINARY_DIR}/manifest.json" COPYONLY)
+	install(FILES
+		"${CMAKE_SOURCE_DIR}/platforms/emscripten/manifest.json"
+		COMPONENT Core
+		DESTINATION "${WZ_APP_INSTALL_DEST}")
+
+	# Install static assets
+	file(GLOB static_assets "${CMAKE_SOURCE_DIR}/platforms/emscripten/assets/*.*")
+	if (static_assets)
+		install(DIRECTORY DESTINATION "${WZ_APP_INSTALL_DEST}/assets" COMPONENT Core)
+		install(FILES
+			${static_assets}
+			COMPONENT Core
+			DESTINATION "${WZ_APP_INSTALL_DEST}/assets")
+		# Also place assets in build dir so it can be run directly
+		file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/assets")
+		foreach(asset IN LISTS static_assets)
+			configure_file("${asset}" "${CMAKE_CURRENT_BINARY_DIR}/assets/" COPYONLY)
+		endforeach()
+	endif()
+
+	# Install additional (optional) file packages
+	foreach(_empackage_dir IN LISTS DATA_ADDITIONAL_EMPACKAGE_DIRS)
+		install(DIRECTORY
+			${_empackage_dir}
+			COMPONENT Core
+			DESTINATION "${WZ_APP_INSTALL_DEST}/pkg")
+	endforeach()
+
+	# Install service worker (and associated files)
+	install(CODE "
+		file(GLOB _service_worker_files LIST_DIRECTORIES false \"${CMAKE_CURRENT_BINARY_DIR}/service-worker.js\" \"${CMAKE_CURRENT_BINARY_DIR}/workbox-*.js\")
+		list(LENGTH _service_worker_files _num_service_worker_files)
+		if (_num_service_worker_files GREATER 0)
+			foreach(_input_file IN LISTS _service_worker_files)
+				file(INSTALL \"\${_input_file}\" DESTINATION \"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}\")
+			endforeach()
+		else()
+			message(WARNING \"Did not find any service worker files in: ${CMAKE_CURRENT_BINARY_DIR}/\")
+		endif()
+	" COMPONENT Core)
+
+	if (WZ_EMSCRIPTEN_COMPRESS_OUTPUT AND NOT CMAKE_VERSION VERSION_LESS "3.18.0")
+		install(CODE "
+			execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}\")
+
+			file(GLOB _files_to_compress LIST_DIRECTORIES false
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/*.js\"
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/*.wasm\"
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/*.data\"
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/*.html\"
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/pkg/music/*.js\"
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/pkg/terrain_overrides/*.js\"
+				\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/pkg/terrain_overrides/*.data\"
+			)
+
+			list(LENGTH _files_to_compress _num_files_to_compress)
+			if (_num_files_to_compress GREATER 0)
+				foreach(_input_file IN LISTS _files_to_compress)
+					file(RELATIVE_PATH _input_file_relative_path \"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}\" \"\${_input_file}\")
+					get_filename_component(_input_file_subdir_path \"\${_input_file_relative_path}\" DIRECTORY)
+					get_filename_component(_input_file_filename \"\${_input_file}\" NAME)
+					execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: Compressing file: \${_input_file_subdir_path}/\${_input_file_filename} -> \${_input_file_subdir_path}/\${_input_file_filename}.gz\")
+					file(ARCHIVE_CREATE OUTPUT \"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/\${_input_file_subdir_path}/\${_input_file_filename}.gz\" PATHS \"\${_input_file}\" FORMAT raw COMPRESSION GZip COMPRESSION_LEVEL 7)
+				endforeach()
+			else()
+				message(WARNING \"Did not find any files to compress in: \${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/\")
+			endif()
+		" COMPONENT Core)
+	endif()
+
+endif()
 
 #####################
 # Installing Required Runtime Dependencies
@@ -655,8 +927,13 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 			list(APPEND _wz_fixup_bundle_ignored_filenames "dbghelp.dll")
 			list(APPEND _wz_fixup_bundle_nocopy_libraries "dbghelp.dll")
 			if(MINGW)
+				set(_additional_lookup_options)
+				if(DEFINED WZ_MINGW_DIST_PATH)
+					message(STATUS "WZ_MINGW_DIST_PATH: \"${WZ_MINGW_DIST_PATH}\"")
+					set(_additional_lookup_options HINTS "${WZ_MINGW_DIST_PATH}")
+				endif()
 				# Find path to C++ stdlib, and preserve for later fixup_bundle use
-				find_file(WZ_STDCXXDLL NAMES "libc++.dll" "libstdc++-6.dll")
+				find_file(WZ_STDCXXDLL NAMES "libc++.dll" "libstdc++-6.dll" ${_additional_lookup_options})
 				if(WZ_STDCXXDLL)
 					message(STATUS "Detected C++ stdlib DLL: ${WZ_STDCXXDLL}")
 					get_filename_component(WZ_STDCXXDLL_PATH "${WZ_STDCXXDLL}" DIRECTORY)
@@ -667,6 +944,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 			if(_wz_fixup_bundle_ignored_filenames)
 				message( STATUS "fixup_bundle: IGNORE_ITEM ${_wz_fixup_bundle_ignored_filenames}" )
 			endif()
+			set(_wz_cmake_module_path "${PROJECT_SOURCE_DIR}/cmake")
 			install(CODE "
 				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: CMAKE_INSTALL_CONFIG_NAME: \${CMAKE_INSTALL_CONFIG_NAME}\")
 				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}\")
@@ -679,10 +957,11 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 				list(FILTER wz_vcpkg_installed_prefix_path EXCLUDE REGEX \"/debug$\")
 				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: vcpkg_installed_prefix_path: \${wz_vcpkg_installed_prefix_path}\")
 				if(\"\${CMAKE_INSTALL_CONFIG_NAME}\" MATCHES \"^([Dd][Ee][Bb][Uu][Gg])$\")
-					set(dll_source_dirs \"\${wz_vcpkg_installed_prefix_path}/debug/bin/\")
+					set(dll_source_dir_vcpkg \"\${wz_vcpkg_installed_prefix_path}/debug/bin/\")
 				else()
-					set(dll_source_dirs \"\${wz_vcpkg_installed_prefix_path}/bin/\")
+					set(dll_source_dir_vcpkg \"\${wz_vcpkg_installed_prefix_path}/bin/\")
 				endif()
+				set(dll_source_dirs \"\${dll_source_dir_vcpkg}\")
 				# MINGW may require distributing the C++ stdlib DLLs
 				set(_WZ_STDCXXDLL_PATH \"${WZ_STDCXXDLL_PATH}\")
 				if(_WZ_STDCXXDLL_PATH AND EXISTS \"\${_WZ_STDCXXDLL_PATH}\")
@@ -710,7 +989,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 						file(REMOVE \"\${_lib_fullpath}\")
 					endif()
 				endforeach()
-				# Sanity-check to ensure that the C++ stdlib, for mingw, actually came from mingw (i.e. is the expected version)
+				# Sanity-check to ensure that the C++ stdlib, for mingw, actually came from mingw (i.e. is the expected version + architecture)
 				set(_WZ_STDCXXDLL \"${WZ_STDCXXDLL}\")
 				if(_WZ_STDCXXDLL AND EXISTS \"\${_WZ_STDCXXDLL}\")
 					file(SHA512 \"\${_WZ_STDCXXDLL}\" _std_cxx_expected_hash)
@@ -721,6 +1000,15 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 						execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++Verified expected C++ stdlib: \${_WZ_STDCXXDLL_FILENAME}\")
 					else()
 						message(FATAL_ERROR \"Copied C++ stdlib does not match expected C++ stdlib\")
+					endif()
+					include(\"${_wz_cmake_module_path}/GetPEFileArch.cmake\")
+					get_pe_file_machine_raw_bytes(\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/${_mainexename}.exe\" _wz_exe_machine_bytes_hex)
+					get_pe_file_machine_raw_bytes(\"\${_copied_cxx_stdlib}\" _cxx_stdlib_machine_bytes_hex)
+					pe_file_machine_raw_bytes_to_arch(\"\${_wz_exe_machine_bytes_hex}\" _wz_exe_arch)
+					if(_wz_exe_machine_bytes_hex STREQUAL _cxx_stdlib_machine_bytes_hex)
+						execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++Verified expected C++ stdlib architecture matches WZ (\${_wz_exe_arch}): \${_WZ_STDCXXDLL_FILENAME}\")
+					else()
+						message(FATAL_ERROR \"Copied C++ stdlib architecture mismatch (WZ: \${_wz_exe_machine_bytes_hex}; \${_copied_cxx_stdlib}: \${_cxx_stdlib_machine_bytes_hex}\")
 					endif()
 					if(NOT CMAKE_VERSION VERSION_LESS 3.16) # file(GET_RUNTIME_DEPENDENCIES ...) requires CMake 3.16+
 						file(GET_RUNTIME_DEPENDENCIES
@@ -742,12 +1030,49 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 									else()
 										message(FATAL_ERROR \"Copied C++ stdlib dependency does not match expected: \${_stdcxx_dependency_filename}\")
 									endif()
+									get_pe_file_machine_raw_bytes(\"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/\${_stdcxx_dependency_filename}\" _stdcxx_dependency_machine_bytes_hex)
+									if(NOT _wz_exe_machine_bytes_hex STREQUAL _stdcxx_dependency_machine_bytes_hex)
+										message(FATAL_ERROR \"Copied C++ library architecture mismatch (WZ: \${_wz_exe_machine_bytes_hex}; \${_stdcxx_dependency_filename}: \${_stdcxx_dependency_machine_bytes_hex}\")
+									endif()
 								endif()
 							endif()
 						endforeach()
 					endif()
 				endif()
 			" COMPONENT Core)
+
+			# Install additional PDBs (from vcpkg-built dependencies)
+			install(CODE "
+				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: CMAKE_INSTALL_CONFIG_NAME: \${CMAKE_INSTALL_CONFIG_NAME}\")
+				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: CMAKE_PREFIX_PATH: ${CMAKE_PREFIX_PATH}\")
+				# vcpkg's vcpkg.cmake adds both the release and debug prefix paths to the CMAKE_PREFIX_PATH:
+				# - ${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET}/debug # (debug prefix)
+				# - ${_VCPKG_INSTALLED_DIR}/${VCPKG_TARGET_TRIPLET} # (release prefix)
+				# the debug path is a subdirectory of the main / release path
+				# remove the debug path, leaving just the base prefix
+				set(wz_vcpkg_installed_prefix_path \"${CMAKE_PREFIX_PATH}\")
+				list(FILTER wz_vcpkg_installed_prefix_path EXCLUDE REGEX \"/debug$\")
+				list(GET wz_vcpkg_installed_prefix_path 0 wz_vcpkg_installed_prefix_path)
+				execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: vcpkg_installed_prefix_path: \${wz_vcpkg_installed_prefix_path}\")
+				if(\"\${CMAKE_INSTALL_CONFIG_NAME}\" MATCHES \"^([Dd][Ee][Bb][Uu][Gg])$\")
+					set(dll_source_dir_vcpkg \"\${wz_vcpkg_installed_prefix_path}/debug/bin/\")
+				else()
+					set(dll_source_dir_vcpkg \"\${wz_vcpkg_installed_prefix_path}/bin/\")
+				endif()
+				file(MAKE_DIRECTORY \"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/\")
+				# Try to copy .PDB files for each of the DLLs (from vcpkg) as well
+				file(GLOB _vcpkg_pdbs LIST_DIRECTORIES false \"\${dll_source_dir_vcpkg}/*.pdb\")
+				list(LENGTH _vcpkg_pdbs _num_vcpkg_pdbs)
+				if (_num_vcpkg_pdbs GREATER 0)
+					foreach(_vcpkg_pdb IN LISTS _vcpkg_pdbs)
+						get_filename_component(_vcpkg_pdb_filename \"\${_vcpkg_pdb}\" NAME)
+						execute_process(COMMAND \${CMAKE_COMMAND} -E echo \"++install CODE: Copying PDB file: \${_vcpkg_pdb_filename}\")
+						file(COPY_FILE \"\${_vcpkg_pdb}\" \"\${CMAKE_INSTALL_PREFIX}/${WZ_APP_INSTALL_DEST}/\${_vcpkg_pdb_filename}\")
+					endforeach()
+				else()
+					message(WARNING \"Did not find any .pdb files in: \${dll_source_dir_vcpkg}\")
+				endif()
+			" COMPONENT AdditionalDebugSymbols)
 
 			# Install LibANGLE DLLs (if available, from vcpkg)
 			find_package(unofficial-angle CONFIG)
@@ -766,6 +1091,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 						install(FILES
 							"${_libEGL_dll}"
 							COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}"
+							RENAME "libEGL.dll" # Make sure it has the proper name (which SDL2 expects)
 						)
 					else()
 						message( WARNING "Missing expected libEGL DLL at: ${_libEGL_dll}" )
@@ -775,6 +1101,7 @@ if(CMAKE_SYSTEM_NAME MATCHES "Windows")
 						install(FILES
 							"${_libGLESv2_dll}"
 							COMPONENT Core DESTINATION "${WZ_APP_INSTALL_DEST}"
+							RENAME "libGLESv2.dll" # Make sure it has the proper name (which SDL2 expects)
 						)
 					else()
 						message( WARNING "Missing expected libGLESv2 DLL at: ${_libGLESv2_dll}" )

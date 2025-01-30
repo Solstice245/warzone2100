@@ -33,7 +33,9 @@ class DropdownItemWrapper;
 class DropdownOverlay: public WIDGET
 {
 public:
-	DropdownOverlay(std::function<void ()> onClickedFunc): onClickedFunc(onClickedFunc)
+	DropdownOverlay(const std::shared_ptr<WIDGET>& parentDropdownWidget, std::function<void ()> onClickedFunc)
+	: onClickedFunc(onClickedFunc)
+	, parentDropdownWidget(parentDropdownWidget)
 	{
 		setCalcLayout(LAMBDA_CALCLAYOUT_SIMPLE({
 			psWidget->setGeometry(0, 0, screenWidth - 1, screenHeight - 1);
@@ -45,26 +47,65 @@ public:
 		onClickedFunc();
 	}
 
+	void display(int xOffset, int yOffset) override
+	{
+		if (parentDropdownWidget)
+		{
+			int x0 = std::max<int>(0, parentDropdownWidget->screenPosX() - 8);
+			int y0 = parentDropdownWidget->screenPosY();
+			int w = parentDropdownWidget->width();
+			int h = parentDropdownWidget->height();
+			pie_UniTransBoxFill(x0, y0, x0 + w + 16, y0 + h, WZCOL_MENU_SCORE_BUILT);
+		}
+
+		displayChildDropShadows(this, xOffset, yOffset);
+	}
+
+private:
 	std::function<void ()> onClickedFunc;
+	std::shared_ptr<WIDGET> parentDropdownWidget;
 };
 
-void DropdownItemWrapper::initialize(const std::shared_ptr<WIDGET> &newItem, DropdownOnSelectHandler newOnSelect)
+void DropdownItemWrapper::initialize(const std::shared_ptr<DropdownWidget>& newParent, const std::shared_ptr<WIDGET> &newItem, DropdownOnSelectHandler newOnSelect)
 {
 	item = newItem;
 	attach(item);
 	onSelect = newOnSelect;
+	parent = newParent;
 }
 
 bool DropdownItemWrapper::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wasPressed)
 {
 	auto result = WIDGET::processClickRecursive(psContext, key, wasPressed);
 
-	if (key != WKEY_NONE && wasPressed && this->hitTest(psContext->mx, psContext->my))
+	if (key != WKEY_NONE && this->hitTest(psContext->mx, psContext->my))
 	{
-		onSelect(std::static_pointer_cast<DropdownItemWrapper>(shared_from_this()));
+		if (auto psStrongParent = parent.lock())
+		{
+			psStrongParent->setMouseClickOnItem(std::dynamic_pointer_cast<DropdownItemWrapper>(shared_from_this()), key, wasPressed);
+		}
+
+		if (wasPressed)
+		{
+			mouseDownOnWrapper = true;
+		}
+		else
+		{
+			// if mouse down + mouse up on the item
+			if (mouseDownOnWrapper)
+			{
+				mouseDownOnWrapper = false;
+				onSelect(std::static_pointer_cast<DropdownItemWrapper>(shared_from_this()));
+			}
+		}
 	}
 
 	return result;
+}
+
+void DropdownItemWrapper::clearMouseDownState()
+{
+	mouseDownOnWrapper = false;
 }
 
 void DropdownItemWrapper::geometryChanged()
@@ -105,6 +146,7 @@ void DropdownWidget::run(W_CONTEXT *psContext)
 
 void DropdownWidget::geometryChanged()
 {
+	itemsList->setGeometry(itemsList->x(), itemsList->y(), width(), itemsList->height());
 	for(auto& item : items)
 	{
 		item->setGeometry(0, 0, width(), height());
@@ -118,7 +160,7 @@ void DropdownWidget::clicked(W_CONTEXT *psContext, WIDGET_KEY key)
 
 int DropdownWidget::calculateDropdownListScreenPosY() const
 {
-	int dropDownOverlayPosY = screenPosY() + height();
+	int dropDownOverlayPosY = screenPosY() - overlayYPosOffset;
 	if (dropDownOverlayPosY + itemsList->height() > screenHeight)
 	{
 		// Positioning the dropdown below would cause it to appear partially or fully offscreen
@@ -137,21 +179,44 @@ int DropdownWidget::calculateDropdownListScreenPosY() const
 void DropdownWidget::open()
 {
 	if (overlayScreen != nullptr) { return; }
+	mouseDownItem.reset();
 	std::weak_ptr<DropdownWidget> pWeakThis(std::dynamic_pointer_cast<DropdownWidget>(shared_from_this()));
 	widgScheduleTask([pWeakThis]() {
 		if (auto dropdownWidget = pWeakThis.lock())
 		{
 			dropdownWidget->overlayScreen = W_SCREEN::make();
-			widgRegisterOverlayScreenOnTopOfScreen(dropdownWidget->overlayScreen, dropdownWidget->screenPointer.lock());
+
+			// calculate the ideal position so that the dropdown appears *overtop* of the currently-selected item (in-place)
+			size_t selectedItemIndex = dropdownWidget->getSelectedIndex().value_or(0);
+			size_t listViewTopIndex = 0;
+			if (dropdownWidget->itemsList->idealHeight() > dropdownWidget->itemsList->height())
+			{
+				size_t maxOffset = std::min<size_t>(2, dropdownWidget->itemsList->numItems());
+				if (selectedItemIndex > maxOffset)
+				{
+					listViewTopIndex = selectedItemIndex - maxOffset;
+				}
+				dropdownWidget->itemsList->scrollToItem(listViewTopIndex);
+			}
+			dropdownWidget->overlayYPosOffset = dropdownWidget->itemsList->getCurrentYPosOfItem(selectedItemIndex);
+
+			auto newRootFrm = std::make_shared<DropdownOverlay>(
+				dropdownWidget,
+				[pWeakThis]() { if (auto dropdownWidget = pWeakThis.lock()) { dropdownWidget->close(); } }
+			);
+			dropdownWidget->overlayScreen->psForm->attach(newRootFrm);
+
 			dropdownWidget->itemsList->setGeometry(dropdownWidget->screenPosX(), dropdownWidget->calculateDropdownListScreenPosY(), dropdownWidget->width(), dropdownWidget->itemsList->height());
-			dropdownWidget->overlayScreen->psForm->attach(dropdownWidget->itemsList);
-			dropdownWidget->overlayScreen->psForm->attach(std::make_shared<DropdownOverlay>([pWeakThis]() { if (auto dropdownWidget = pWeakThis.lock()) { dropdownWidget->close(); } }));
+			newRootFrm->attach(dropdownWidget->itemsList);
+
+			widgRegisterOverlayScreenOnTopOfScreen(dropdownWidget->overlayScreen, dropdownWidget->screenPointer.lock());
 		}
 	});
 }
 
 void DropdownWidget::close()
 {
+	mouseDownItem.reset();
 	std::weak_ptr<DropdownWidget> pWeakThis(std::dynamic_pointer_cast<DropdownWidget>(shared_from_this()));
 	widgScheduleTask([pWeakThis]() {
 		if (auto dropdownWidget = pWeakThis.lock())
@@ -189,20 +254,36 @@ void DropdownWidget::display(int xOffset, int yOffset)
 
 void DropdownWidget::addItem(const std::shared_ptr<WIDGET> &item)
 {
-	auto itemOnSelect = [this](std::shared_ptr<DropdownItemWrapper> selected) {
-		if (!overlayScreen) {
-			open();
+	std::weak_ptr<DropdownWidget> pWeakThis(std::dynamic_pointer_cast<DropdownWidget>(shared_from_this()));
+	size_t newItemIndex = items.size();
+	auto itemOnSelect = [newItemIndex, pWeakThis](std::shared_ptr<DropdownItemWrapper> selected) {
+		auto psStrongDropdown = pWeakThis.lock();
+		ASSERT_OR_RETURN(, psStrongDropdown != nullptr, "DropdownWidget no longer exists?");
+		if (!psStrongDropdown->overlayScreen) {
+			psStrongDropdown->open();
 			return;
 		}
 
-		select(selected);
-		close();
+		if (psStrongDropdown->select(selected, newItemIndex))
+		{
+			psStrongDropdown->close();
+		}
 	};
 
-	auto wrapper = DropdownItemWrapper::make(item, itemOnSelect);
+	auto wrapper = DropdownItemWrapper::make(std::dynamic_pointer_cast<DropdownWidget>(shared_from_this()), item, itemOnSelect);
+	wrapper->setGeometry(0, 0, width(), height());
 
 	items.push_back(wrapper);
 	itemsList->addItem(wrapper);
+}
+
+void DropdownWidget::clear()
+{
+	items.clear();
+	itemsList->clear();
+	selectedItem.reset();
+	mouseOverItem.reset();
+	mouseDownItem.reset();
 }
 
 bool DropdownWidget::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key, bool wasPressed)
@@ -220,4 +301,23 @@ bool DropdownWidget::processClickRecursive(W_CONTEXT *psContext, WIDGET_KEY key,
 	}
 
 	return WIDGET::processClickRecursive(psContext, key, wasPressed);
+}
+
+void DropdownWidget::setMouseClickOnItem(std::shared_ptr<DropdownItemWrapper> item, WIDGET_KEY key, bool wasPressed)
+{
+	if (item == mouseDownItem) { return; }
+
+	if (mouseDownItem)
+	{
+		mouseDownItem->clearMouseDownState();
+	}
+
+	if (wasPressed)
+	{
+		mouseDownItem = item;
+	}
+	else
+	{
+		mouseDownItem.reset();
+	}
 }

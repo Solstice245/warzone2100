@@ -1,7 +1,7 @@
 /*
 	This file is part of Warzone 2100.
 	Copyright (C) 1999-2004  Eidos Interactive
-	Copyright (C) 2005-2020  Warzone 2100 Project
+	Copyright (C) 2005-2024  Warzone 2100 Project
 
 	Warzone 2100 is free software; you can redistribute it and/or modify
 	it under the terms of the GNU General Public License as published by
@@ -35,11 +35,20 @@
 #include "radar.h"
 #include "activity.h"
 
+#define MAX_REPLAY_FILES 36
+constexpr int MAX_OLD_LOGS = 50;
+
 /***************************************************************************/
+
+#if !defined(__EMSCRIPTEN__)
+#define WZ_DEFAULT_FMV_MODE FMV_FULLSCREEN
+#else
+#define WZ_DEFAULT_FMV_MODE FMV_2X
+#endif
 
 struct WARZONE_GLOBALS
 {
-	FMV_MODE FMVmode = FMV_FULLSCREEN;
+	FMV_MODE FMVmode = WZ_DEFAULT_FMV_MODE;
 	UDWORD width = 1024;
 	UDWORD height = 768;
 	UDWORD videoBufferDepth = 32;
@@ -65,11 +74,35 @@ struct WARZONE_GLOBALS
 	JS_BACKEND jsBackend = (JS_BACKEND)0;
 	bool autoAdjustDisplayScale = true;
 	int autoLagKickSeconds = 60;
+	int autoDesyncKickSeconds = 10;
 	bool disableReplayRecording = false;
+	int maxReplaysSaved = MAX_REPLAY_FILES;
+	int oldLogsLimit = MAX_OLD_LOGS;
 	uint32_t MPinactivityMinutes = 5;
+	uint32_t MPgameTimeLimitMinutes = 0; // default to unlimited
 	uint8_t MPopenSpectatorSlots = 0;
+	PLAYER_LEAVE_MODE MPplayerLeaveMode = PLAYER_LEAVE_MODE_DEFAULT;
 	int fogStart = 4000;
 	int fogEnd = 8000;
+	int lodDistanceBiasPercentage = WZ_LODDISTANCEPERCENTAGE_HIGH; // default to "High" to best match prior version behavior
+	int minimizeOnFocusLoss = -1; // see enum class MinimizeOnFocusLossBehavior
+	// fullscreen mode settings
+	UDWORD fullscreenModeWidth = 0; // current display default
+	UDWORD fullscreenModeHeight = 0; // current display default
+	int fullscreenModeScreen = -1;
+	int toggleFullscreenMode = 0; // 0 = the backend default
+	unsigned int cursorScale = 100;
+	// shadow mapping settings
+	uint32_t shadowFilteringMode = 1;
+	uint32_t shadowFilterSize = 5;
+	uint32_t shadowMapResolution = 0; // this defaults to 0, which causes the gfx backend to figure out a recommended default based on the system properties
+	bool pointLightLighting = false;
+	// UI config
+	bool groupsMenuEnabled = true;
+	uint8_t optionsButtonVisibility = 100;
+
+	// run-time only settings (not persisted to config!)
+	bool allowVulkanImplicitLayers = false;
 };
 
 static WARZONE_GLOBALS warGlobs;
@@ -192,6 +225,16 @@ void war_SetDisplayScale(unsigned int scale)
 {
 	warGlobs.displayScale = scale;
 	ActivityManager::instance().changedSetting("displayScale", std::to_string(scale));
+}
+
+void war_setCursorScale(unsigned int scale)
+{
+	warGlobs.cursorScale = std::max<unsigned int>(scale, 100);
+}
+
+unsigned int war_getCursorScale()
+{
+	return warGlobs.cursorScale;
 }
 
 void war_SetWidth(UDWORD width)
@@ -378,6 +421,28 @@ void war_SetRadarJump(bool radarJump)
 	ActivityManager::instance().changedSetting("radarJump", std::to_string(radarJump));
 }
 
+int war_getLODDistanceBiasPercentage()
+{
+	return warGlobs.lodDistanceBiasPercentage;
+}
+
+void war_setLODDistanceBiasPercentage(int bias)
+{
+	if (bias > 200) { bias = 200; }
+	if (bias < -200) { bias = -200; }
+	warGlobs.lodDistanceBiasPercentage = bias;
+}
+
+int war_getMinimizeOnFocusLoss()
+{
+	return warGlobs.minimizeOnFocusLoss;
+}
+
+void war_setMinimizeOnFocusLoss(int val)
+{
+	warGlobs.minimizeOnFocusLoss = val;
+}
+
 video_backend war_getGfxBackend()
 {
 	return warGlobs.gfxBackend;
@@ -423,6 +488,21 @@ void war_setAutoLagKickSeconds(int seconds)
 	warGlobs.autoLagKickSeconds = seconds;
 }
 
+int war_getAutoDesyncKickSeconds()
+{
+	return warGlobs.autoDesyncKickSeconds;
+}
+
+void war_setAutoDesyncKickSeconds(int seconds)
+{
+	seconds = std::max(seconds, 0);
+	if (seconds > 0)
+	{
+		seconds = std::max(seconds, 10);
+	}
+	warGlobs.autoDesyncKickSeconds = seconds;
+}
+
 bool war_getDisableReplayRecording()
 {
 	return warGlobs.disableReplayRecording;
@@ -431,6 +511,26 @@ bool war_getDisableReplayRecording()
 void war_setDisableReplayRecording(bool disable)
 {
 	warGlobs.disableReplayRecording = disable;
+}
+
+int war_getMaxReplaysSaved()
+{
+	return warGlobs.maxReplaysSaved;
+}
+
+void war_setMaxReplaysSaved(int maxReplaysSaved)
+{
+	warGlobs.maxReplaysSaved = maxReplaysSaved;
+}
+
+int war_getOldLogsLimit()
+{
+	return warGlobs.oldLogsLimit;
+}
+
+void war_setOldLogsLimit(int oldLogsLimit)
+{
+	warGlobs.oldLogsLimit = oldLogsLimit;
 }
 
 uint32_t war_getMPInactivityMinutes()
@@ -447,6 +547,20 @@ void war_setMPInactivityMinutes(uint32_t minutes)
 	warGlobs.MPinactivityMinutes = minutes;
 }
 
+uint32_t war_getMPGameTimeLimitMinutes()
+{
+	return warGlobs.MPgameTimeLimitMinutes;
+}
+
+void war_setMPGameTimeLimitMinutes(uint32_t minutes)
+{
+	if (minutes > 0 && minutes < MIN_MPGAMETIMELIMIT_MINUTES)
+	{
+		minutes = MIN_MPGAMETIMELIMIT_MINUTES;
+	}
+	warGlobs.MPgameTimeLimitMinutes = minutes;
+}
+
 uint16_t war_getMPopenSpectatorSlots()
 {
 	return warGlobs.MPopenSpectatorSlots;
@@ -456,6 +570,16 @@ void war_setMPopenSpectatorSlots(uint16_t spectatorSlots)
 {
 	spectatorSlots = std::min<uint16_t>(spectatorSlots, MAX_SPECTATOR_SLOTS);
 	warGlobs.MPopenSpectatorSlots = spectatorSlots;
+}
+
+PLAYER_LEAVE_MODE war_getMPPlayerLeaveMode()
+{
+	return warGlobs.MPplayerLeaveMode;
+}
+
+void war_setMPPlayerLeaveMode(PLAYER_LEAVE_MODE mode)
+{
+	warGlobs.MPplayerLeaveMode = mode;
 }
 
 int war_getFogEnd()
@@ -476,4 +600,121 @@ void war_setFogEnd(int end)
 void war_setFogStart(int start)
 {
 	 warGlobs.fogStart = start;
+}
+
+void war_SetFullscreenModeWidth(UDWORD width)
+{
+	warGlobs.fullscreenModeWidth = width;
+}
+
+UDWORD war_GetFullscreenModeWidth()
+{
+	return warGlobs.fullscreenModeWidth;
+}
+
+void war_SetFullscreenModeHeight(UDWORD height)
+{
+	warGlobs.fullscreenModeHeight = height;
+}
+
+UDWORD war_GetFullscreenModeHeight()
+{
+	return warGlobs.fullscreenModeHeight;
+}
+void war_SetFullscreenModeScreen(int screen)
+{
+	warGlobs.fullscreenModeScreen = screen;
+}
+
+int war_GetFullscreenModeScreen()
+{
+	return warGlobs.fullscreenModeScreen;
+}
+
+void war_setToggleFullscreenMode(int mode)
+{
+	warGlobs.toggleFullscreenMode = mode;
+}
+
+int war_getToggleFullscreenMode()
+{
+	return warGlobs.toggleFullscreenMode;
+}
+
+uint32_t war_getShadowFilterSize()
+{
+	return warGlobs.shadowFilterSize;
+}
+
+void war_setShadowFilterSize(uint32_t filterSize)
+{
+	if (filterSize > 7)
+	{
+		debug(LOG_INFO, "Shadow filter size %" PRIu32 " may not have the desired effect", filterSize);
+	}
+	warGlobs.shadowFilterSize = filterSize;
+}
+
+uint32_t war_getShadowMapResolution()
+{
+	return warGlobs.shadowMapResolution;
+}
+
+void war_setShadowMapResolution(uint32_t resolution)
+{
+	if (resolution > 0 && ((resolution & (resolution - 1)) != 0))
+	{
+		debug(LOG_ERROR, "Shadow map resolution %" PRIu32 " is unsupported: must be a power of 2", resolution);
+		return;
+	}
+	if (resolution > 0 && (resolution < 2048 || resolution > 4096)) // 0 is a special case that maps to "figure out a decent default for this system"
+	{
+		debug(LOG_INFO, "Shadow map resolution %" PRIu32 " may not have the desired effect", resolution);
+	}
+	warGlobs.shadowMapResolution = resolution;
+}
+
+bool war_getPointLightPerPixelLighting()
+{
+	return warGlobs.pointLightLighting;
+}
+
+void war_setPointLightPerPixelLighting(bool perPixelEnabled)
+{
+	warGlobs.pointLightLighting = perPixelEnabled;
+}
+
+bool war_getGroupsMenuEnabled()
+{
+	return warGlobs.groupsMenuEnabled;
+}
+
+void war_setGroupsMenuEnabled(bool enabled)
+{
+	warGlobs.groupsMenuEnabled = enabled;
+}
+
+void war_runtimeOnlySetAllowVulkanImplicitLayers(bool allowed) // not persisted to config
+{
+	warGlobs.allowVulkanImplicitLayers = allowed;
+}
+
+uint8_t war_getOptionsButtonVisibility()
+{
+	return warGlobs.optionsButtonVisibility;
+}
+
+void war_setOptionsButtonVisibility(uint8_t val)
+{
+	val = std::min<uint8_t>(val, 100);
+	if (val > 0)
+	{
+		val = std::max<uint8_t>(val, 50);
+	}
+	warGlobs.optionsButtonVisibility = val;
+}
+
+bool war_getAllowVulkanImplicitLayers()
+{
+	return warGlobs.allowVulkanImplicitLayers;
 }

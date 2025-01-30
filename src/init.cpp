@@ -48,6 +48,7 @@
 #include "input/manager.h"
 #include "advvis.h"
 #include "atmos.h"
+#include "campaigninfo.h"
 #include "challenge.h"
 #include "cmddroid.h"
 #include "configuration.h"
@@ -58,6 +59,7 @@
 #include "display3d.h"
 #include "edit3d.h"
 #include "effects.h"
+#include "formation.h"
 #include "fpath.h"
 #include "frend.h"
 #include "frontend.h"
@@ -97,6 +99,9 @@
 #include "spectatorwidgets.h"
 #include "seqdisp.h"
 #include "version.h"
+#include "hci/teamstrategy.h"
+#include "screens/guidescreen.h"
+#include "wzapi.h"
 
 #include <algorithm>
 #include <unordered_map>
@@ -111,11 +116,14 @@ char fileLoadBuffer[FILE_LOAD_BUFFER_SIZE];
 
 IMAGEFILE *FrontImages;
 
-static wzSearchPath *searchPathRegistry = nullptr;
+static std::vector<std::unique_ptr<wzSearchPath>> searchPathRegistry;
+static std::vector<std::string> searchPathMountErrors;
 
 static std::string inMemoryMapVirtualFilenameUID;
 static std::vector<uint8_t> inMemoryMapArchiveData;
 static size_t inMemoryMapArchiveMounted = 0;
+
+static optional<std::vector<TerrainShaderQuality>> cachedAvailableTerrainShaderQualityTextures;
 
 struct WZmapInfo
 {
@@ -133,16 +141,6 @@ typedef std::string MapName;
 typedef std::unordered_map<MapName, WZmapInfo> WZMapInfo_Map;
 WZMapInfo_Map WZ_Maps;
 
-enum MODS_PATHS: size_t
-{
-	MODS_MUSIC,
-	MODS_GLOBAL,
-	MODS_AUTOLOAD,
-	MODS_CAMPAIGN,
-	MODS_MULTIPLAY,
-	MODS_PATHS_MAX
-};
-
 static std::string getFullModPath(MODS_PATHS type)
 {
 	switch (type)
@@ -154,7 +152,8 @@ static std::string getFullModPath(MODS_PATHS type)
 		case MODS_AUTOLOAD:
 			return version_getVersionedModsFolderPath("autoload");
 		case MODS_CAMPAIGN:
-			return version_getVersionedModsFolderPath("campaign");
+			// With the new campaign mod packaging format, we no longer need a versioned path (as the mods contain version compatibility info)
+			return "mods/campaign";
 		case MODS_MULTIPLAY:
 			return version_getVersionedModsFolderPath("multiplay");
 		case MODS_PATHS_MAX:
@@ -173,7 +172,7 @@ static std::array<std::string, MODS_PATHS_MAX> buildFullModsPaths()
 	return result;
 }
 
-static const char* versionedModsPath(MODS_PATHS type)
+const char* versionedModsPath(MODS_PATHS type)
 {
 	static std::array<std::string, MODS_PATHS_MAX> cachedFullModsPaths = buildFullModsPaths();
 	return cachedFullModsPaths[type].c_str();
@@ -186,7 +185,6 @@ static const char* versionedModsPath(MODS_PATHS type)
 static bool InitialiseGlobals()
 {
 	frontendInitVars();	// Initialise frontend globals and statics.
-	statsInitVars();
 	structureInitVars();
 	if (!messageInitVars())
 	{
@@ -234,24 +232,31 @@ bool loadLevFile(const std::string& filename, searchPathMode pathMode, bool igno
 	return true;
 }
 
+bool loadLevFile_JSON(const std::string& mountPoint, const std::string& filename, searchPathMode pathMode, char const *realFileName)
+{
+	if (realFileName == nullptr)
+	{
+		debug(LOG_WZ, "Loading lev file: \"%s\", builtin\n", filename.c_str());
+	}
+	else
+	{
+		debug(LOG_WZ, "Loading lev file: \"%s\" from \"%s\"\n", filename.c_str(), realFileName);
+	}
+
+	if (!levParse_JSON(mountPoint, filename, pathMode, realFileName))
+	{
+		debug(LOG_ERROR, "Failed to load: %s\n", filename.c_str());
+		return false;
+	}
+
+	return true;
+}
+
 
 static void cleanSearchPath()
 {
-	wzSearchPath *curSearchPath = searchPathRegistry, * tmpSearchPath = nullptr;
-
-	// Start at the lowest priority
-	while (curSearchPath->lowerPriority)
-	{
-		curSearchPath = curSearchPath->lowerPriority;
-	}
-
-	while (curSearchPath)
-	{
-		tmpSearchPath = curSearchPath->higherPriority;
-		free(curSearchPath);
-		curSearchPath = tmpSearchPath;
-	}
-	searchPathRegistry = nullptr;
+	searchPathRegistry.clear();
+	cachedAvailableTerrainShaderQualityTextures.reset();
 }
 
 
@@ -259,55 +264,44 @@ static void cleanSearchPath()
  * Register searchPath above the path with next lower priority
  * For information about what can be a search path, refer to PhysFS documentation
  */
-void registerSearchPath(const char path[], unsigned int priority)
+void registerSearchPath(const std::string& newPath, unsigned int priority)
 {
-	wzSearchPath *curSearchPath = searchPathRegistry, * tmpSearchPath = nullptr;
-
-	tmpSearchPath = (wzSearchPath *)malloc(sizeof(*tmpSearchPath));
-	sstrcpy(tmpSearchPath->path, path);
-	if (path[strlen(path) - 1] != *PHYSFS_getDirSeparator())
+	ASSERT_OR_RETURN(, !newPath.empty(), "Calling registerSearchPath with empty path, priority %u", priority);
+	std::unique_ptr<wzSearchPath> tmpSearchPath = std::make_unique<wzSearchPath>();
+	tmpSearchPath->path = newPath;
+	if (!strEndsWith(tmpSearchPath->path, PHYSFS_getDirSeparator()))
 	{
-		sstrcat(tmpSearchPath->path, PHYSFS_getDirSeparator());
+		tmpSearchPath->path += PHYSFS_getDirSeparator();
 	}
 	tmpSearchPath->priority = priority;
 
-	debug(LOG_WZ, "registerSearchPath: Registering %s at priority %i", path, priority);
-	if (!curSearchPath)
+	debug(LOG_WZ, "registerSearchPath: Registering %s at priority %i", newPath.c_str(), priority);
+
+	// insert in sorted order
+	auto insert_pos = std::upper_bound(searchPathRegistry.begin(), searchPathRegistry.end(), tmpSearchPath, [](const std::unique_ptr<wzSearchPath>& a, const std::unique_ptr<wzSearchPath>& b) {
+		return a->priority < b->priority;
+	});
+	searchPathRegistry.insert(insert_pos, std::move(tmpSearchPath));
+
+	cachedAvailableTerrainShaderQualityTextures.reset();
+}
+
+void unregisterSearchPath(const std::string& path)
+{
+	for (auto it = searchPathRegistry.begin(); it != searchPathRegistry.end(); )
 	{
-		searchPathRegistry = tmpSearchPath;
-		searchPathRegistry->lowerPriority = nullptr;
-		searchPathRegistry->higherPriority = nullptr;
-		return;
+		const auto& curSearchPath = *it;
+		if (curSearchPath && (curSearchPath->path.compare(path) == 0))
+		{
+			// ignore this notification - remove from the list
+			it = searchPathRegistry.erase(it);
+			continue;
+		}
+
+		++it;
 	}
 
-	while (curSearchPath->higherPriority && priority > curSearchPath->priority)
-	{
-		curSearchPath = curSearchPath->higherPriority;
-	}
-	while (curSearchPath->lowerPriority && priority < curSearchPath->priority)
-	{
-		curSearchPath = curSearchPath->lowerPriority;
-	}
-
-	if (priority < curSearchPath->priority)
-	{
-		tmpSearchPath->lowerPriority = curSearchPath->lowerPriority;
-		tmpSearchPath->higherPriority = curSearchPath;
-	}
-	else
-	{
-		tmpSearchPath->lowerPriority = curSearchPath;
-		tmpSearchPath->higherPriority = curSearchPath->higherPriority;
-	}
-
-	if (tmpSearchPath->lowerPriority)
-	{
-		tmpSearchPath->lowerPriority->higherPriority = tmpSearchPath;
-	}
-	if (tmpSearchPath->higherPriority)
-	{
-		tmpSearchPath->higherPriority->lowerPriority = tmpSearchPath;
-	}
+	cachedAvailableTerrainShaderQualityTextures.reset();
 }
 
 std::list<std::string> getPhysFSSearchPathsAsStr()
@@ -324,6 +318,38 @@ std::list<std::string> getPhysFSSearchPathsAsStr()
 	}
 	PHYSFS_freeList(list);
 	return results;
+}
+
+void debugOutputSearchPaths()
+{
+	debug(LOG_INFO, "Search path registry:");
+	size_t idx = 0;
+	for (const auto& curSearchPath : searchPathRegistry)
+	{
+		debug(LOG_INFO, "- [%zu] [priority: %u]: %s", idx, curSearchPath->priority, curSearchPath->path.c_str());
+		++idx;
+	}
+	debug(LOG_INFO, "Enumerated search paths:");
+	auto searchPaths = getPhysFSSearchPathsAsStr();
+	idx = 0;
+	for (const auto& curSearchPath : searchPaths)
+	{
+		debug(LOG_INFO, "- [%zu]: %s", idx,  curSearchPath.c_str());
+		++idx;
+	}
+}
+
+void debugOutputSearchPathMountErrors()
+{
+	if (searchPathMountErrors.empty())
+	{
+		return;
+	}
+	debug(LOG_INFO, "Search path mount errors:");
+	for (const auto& errorStr : searchPathMountErrors)
+	{
+		debug(LOG_INFO, "%s", errorStr.c_str());
+	}
 }
 
 static void clearAllPhysFSSearchPaths()
@@ -381,21 +407,186 @@ static void clearInMemoryMapFile(void *pData)
 	}
 }
 
+static bool WZ_PHYSFS_MountSearchPathWrapper(const char *newDir, const char *mountPoint, int appendToPath)
+{
+	if (PHYSFS_mount(newDir, mountPoint, appendToPath) != 0)
+	{
+		return true;
+	}
+	else
+	{
+		// mount failed
+#if defined(WZ_PHYSFS_2_1_OR_GREATER)
+		auto errorCode = PHYSFS_getLastErrorCode();
+		if (errorCode != PHYSFS_ERR_NOT_FOUND)
+		{
+			const char* errorStr = PHYSFS_getErrorByCode(errorCode);
+			searchPathMountErrors.push_back(astringf("Failed to mount \"%s\" @ \"%s\": %s", newDir, mountPoint, (errorStr) ? errorStr : "<no details available?>"));
+		}
+#endif
+		return false;
+	}
+}
+
+struct RebuildSearchPathCommand
+{
+	searchPathMode mode = mod_clean;
+	bool force = false;
+	optional<std::string> current_map;
+	optional<std::string> current_map_mount_point;
+	TerrainShaderQuality lastTerrainShaderQuality = TerrainShaderQuality::MEDIUM;
+};
+
+static RebuildSearchPathCommand lastCommand;
+
+bool rebuildExistingSearchPathWithGraphicsOptionChange()
+{
+	char* current_map = nullptr;
+	char* current_map_mount_point = nullptr;
+	if (lastCommand.current_map.has_value())
+	{
+		current_map = strdup(lastCommand.current_map.value().c_str());
+	}
+	if (lastCommand.current_map_mount_point.has_value())
+	{
+		current_map_mount_point = strdup(lastCommand.current_map_mount_point.value().c_str());
+	}
+	bool result = rebuildSearchPath(lastCommand.mode, false /* do not force */, current_map, current_map_mount_point);
+	free(current_map);
+	free(current_map_mount_point);
+	return result;
+}
+
+optional<std::string> getTerrainOverrideBaseSourcePath(TerrainShaderQuality quality)
+ {
+	switch (quality)
+	{
+		case TerrainShaderQuality::CLASSIC:
+			return "terrain_overrides/classic";
+		case TerrainShaderQuality::MEDIUM:
+			return nullopt;
+		case TerrainShaderQuality::NORMAL_MAPPING:
+			return "terrain_overrides/high";
+		case TerrainShaderQuality::UNINITIALIZED_PICK_DEFAULT:
+			return nullopt;
+	}
+	return nullopt; // silence compiler warning
+ }
+
+optional<std::string> getCurrentTerrainOverrideBaseSourcePath()
+{
+	return getTerrainOverrideBaseSourcePath(getTerrainShaderQuality());
+}
+
+std::vector<TerrainShaderQuality> getAvailableTerrainShaderQualityTextures()
+{
+	// Cached result, which is invalidated with any calls to: cleanSearchPath / registerSearchPath / unregisterSearchPath
+	if (cachedAvailableTerrainShaderQualityTextures.has_value())
+	{
+		return cachedAvailableTerrainShaderQualityTextures.value();
+	}
+
+	std::vector<TerrainShaderQuality> result;
+	auto allQualities = getAllTerrainShaderQualityOptions();
+
+	auto checkValidTerrainOverridesPath = [](const std::string& terrainOverridesPlatformDependentPath) -> bool {
+		if (PHYSFS_mount(terrainOverridesPlatformDependentPath.c_str(), "WZTerrainOverrideTest", PHYSFS_APPEND) == 0)
+		{
+			return false;
+		}
+
+		// Get the actual mount point for this archive
+		// (Why? Because it could have been mounted *before* this check at a different location, if it's the currently-selected terrain override pack and is present...)
+		const char* mountPoint = PHYSFS_getMountPoint(terrainOverridesPlatformDependentPath.c_str());
+		std::string actualMountPoint = (mountPoint) ? mountPoint : "WZTerrainOverrideTest";
+		if (!strEndsWith(actualMountPoint, "/"))
+		{
+			actualMountPoint += "/";
+		}
+
+		bool validTerrainOverridesPackage = false;
+
+		// Sanity check: For texpages and/or tileset folder(s)
+		std::string checkFolder = actualMountPoint + "texpages";
+		if (WZ_PHYSFS_isDirectory(checkFolder.c_str()))
+		{
+			validTerrainOverridesPackage = true;
+		}
+		checkFolder = actualMountPoint + "tileset";
+		if (!validTerrainOverridesPackage && WZ_PHYSFS_isDirectory(checkFolder.c_str()))
+		{
+			validTerrainOverridesPackage = true;
+		}
+
+		if (!WZ_PHYSFS_unmount(terrainOverridesPlatformDependentPath.c_str()))
+		{
+			debug(LOG_WZ, "* Failed to remove path %s again", terrainOverridesPlatformDependentPath.c_str());
+		}
+
+		return validTerrainOverridesPackage;
+	};
+
+	std::string tmpstr;
+	for (const auto& quality : allQualities)
+	{
+		auto textureOverrideBaseSourcePath = getTerrainOverrideBaseSourcePath(quality);
+		bool foundTexturePack = false;
+		if (textureOverrideBaseSourcePath.has_value())
+		{
+			// Check all search paths for this folder or .wz file
+			for (const auto& curSearchPath : searchPathRegistry)
+			{
+				// Check <path> (folder)
+				tmpstr = curSearchPath->path + textureOverrideBaseSourcePath.value();
+				if (checkValidTerrainOverridesPath(tmpstr))
+				{
+					foundTexturePack = true;
+					break;
+				}
+
+				// Check <path>.wz
+				tmpstr += ".wz";
+				if (checkValidTerrainOverridesPath(tmpstr))
+				{
+					foundTexturePack = true;
+					break;
+				}
+			}
+		}
+		else
+		{
+			// quality doesn’t need a separate texture pack - always available
+			foundTexturePack = true;
+		}
+
+		if (foundTexturePack)
+		{
+			result.push_back(quality);
+		}
+	}
+
+	cachedAvailableTerrainShaderQualityTextures = result;
+
+	return result;
+}
+
 /*!
  * \brief Rebuilds the PHYSFS searchPath with mode specific subdirs
  *
  * Priority:
  * maps > mods > base > base.wz
  */
-bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
+bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map, const char* current_map_mount_point)
 {
+	std::string tmpstr;
 	static searchPathMode current_mode = mod_clean;
-	static std::string current_current_map;
-	wzSearchPath *curSearchPath = searchPathRegistry;
-	char tmpstr[PATH_MAX] = "\0";
+	auto currentTerrainShaderQuality = getTerrainShaderQuality();
 
-	if (mode != current_mode || (current_map != nullptr ? current_map : "") != current_current_map || force ||
-	    (use_override_mods && override_mod_list != getModList()))
+	if (mode != current_mode
+		|| (current_map != nullptr ? current_map : "") != lastCommand.current_map.value_or("")
+		|| force
+		|| lastCommand.lastTerrainShaderQuality != currentTerrainShaderQuality
+		|| (use_override_mods && override_mod_list != getModList()))
 	{
 		if (mode != mod_clean)
 		{
@@ -403,13 +594,22 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
 		}
 
 		current_mode = mode;
-		current_current_map = current_map != nullptr ? current_map : "";
-
-		// Start at the lowest priority
-		while (curSearchPath->lowerPriority)
+		lastCommand.mode = mode; // store this separately, so it doesn't get overridden by anything below
+		lastCommand.force = force;
+		lastCommand.current_map.reset();
+		if (current_map != nullptr)
 		{
-			curSearchPath = curSearchPath->lowerPriority;
+			lastCommand.current_map = current_map;
 		}
+		lastCommand.current_map_mount_point.reset();
+		if (current_map_mount_point != nullptr)
+		{
+			lastCommand.current_map_mount_point = current_map_mount_point;
+		}
+		lastCommand.lastTerrainShaderQuality = currentTerrainShaderQuality;
+
+		auto terrainQualityOverrideBasePath = getCurrentTerrainOverrideBaseSourcePath();
+		bool loadedTerrainTextureOverrides = false;
 
 		switch (mode)
 		{
@@ -417,109 +617,105 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
 			debug(LOG_WZ, "Cleaning up");
 			clearLoadedMods();
 
-			while (curSearchPath)
+			for (const auto& curSearchPath : searchPathRegistry)
 			{
 #ifdef DEBUG
-				debug(LOG_WZ, "Removing [%s] from search path", curSearchPath->path);
+				debug(LOG_WZ, "Removing [%s] from search path", curSearchPath->path.c_str());
 #endif // DEBUG
 				// Remove maps and mods
-				removeSubdirs(curSearchPath->path, "maps");
-				removeSubdirs(curSearchPath->path, versionedModsPath(MODS_MUSIC));
-				removeSubdirs(curSearchPath->path, versionedModsPath(MODS_GLOBAL));
-				removeSubdirs(curSearchPath->path, versionedModsPath(MODS_AUTOLOAD));
-				removeSubdirs(curSearchPath->path, versionedModsPath(MODS_CAMPAIGN));
-				removeSubdirs(curSearchPath->path, versionedModsPath(MODS_MULTIPLAY));
-				removeSubdirs(curSearchPath->path, "mods/downloads"); // not versioned
+				removeSubdirs(curSearchPath->path.c_str(), "maps");
+				removeSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_MUSIC));
+				removeSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_GLOBAL));
+				removeSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_AUTOLOAD));
+				removeSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_CAMPAIGN));
+				removeSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_MULTIPLAY));
+				removeSubdirs(curSearchPath->path.c_str(), "mods/downloads"); // not versioned
 
 				// Remove multiplay patches
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "mp");
-				WZ_PHYSFS_unmount(tmpstr);
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "mp.wz");
-				WZ_PHYSFS_unmount(tmpstr);
+				tmpstr = curSearchPath->path + "mp";
+				WZ_PHYSFS_unmount(tmpstr.c_str());
+				tmpstr = curSearchPath->path + "mp.wz";
+				WZ_PHYSFS_unmount(tmpstr.c_str());
 
 				// Remove plain dir
-				WZ_PHYSFS_unmount(curSearchPath->path);
+				WZ_PHYSFS_unmount(curSearchPath->path.c_str());
 
 				// Remove base files
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "base");
-				WZ_PHYSFS_unmount(tmpstr);
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "base.wz");
-				WZ_PHYSFS_unmount(tmpstr);
+				tmpstr = curSearchPath->path + "base";
+				WZ_PHYSFS_unmount(tmpstr.c_str());
+				tmpstr = curSearchPath->path + "base.wz";
+				WZ_PHYSFS_unmount(tmpstr.c_str());
 
 				// remove video search path as well
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "sequences.wz");
-				WZ_PHYSFS_unmount(tmpstr);
-				curSearchPath = curSearchPath->higherPriority;
+				tmpstr = curSearchPath->path + "sequences.wz";
+				WZ_PHYSFS_unmount(tmpstr.c_str());
 			}
 
 			// This should properly remove all paths, but testing is needed to ensure that all supported versions of PhysFS behave as expected
 			// For now, keep the old code above as well as this new method
 			clearAllPhysFSSearchPaths();
+			searchPathMountErrors.clear();
 			break;
 		case mod_campaign:
 			debug(LOG_WZ, "*** Switching to campaign mods ***");
 			clearLoadedMods();
 
-			while (curSearchPath)
+			for (const auto& curSearchPath : searchPathRegistry)
 			{
 				// make sure videos override included files
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "sequences.wz");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-				curSearchPath = curSearchPath->higherPriority;
+				tmpstr = curSearchPath->path + "sequences.wz";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
 			}
-			curSearchPath = searchPathRegistry;
-			while (curSearchPath->lowerPriority)
-			{
-				curSearchPath = curSearchPath->lowerPriority;
-			}
-			while (curSearchPath)
+
+			for (const auto& curSearchPath : searchPathRegistry)
 			{
 #ifdef DEBUG
-				debug(LOG_WZ, "Adding [%s] to search path", curSearchPath->path);
+				debug(LOG_WZ, "Adding [%s] to search path", curSearchPath->path.c_str());
 #endif // DEBUG
 				// Add global and campaign mods
-				PHYSFS_mount(curSearchPath->path, NULL, PHYSFS_APPEND);
+				WZ_PHYSFS_MountSearchPathWrapper(curSearchPath->path.c_str(), NULL, PHYSFS_APPEND);
 
-				addSubdirs(curSearchPath->path, versionedModsPath(MODS_MUSIC), PHYSFS_APPEND, nullptr, false);
-				addSubdirs(curSearchPath->path, versionedModsPath(MODS_GLOBAL), PHYSFS_APPEND, use_override_mods ? &override_mods : &global_mods, true);
-				addSubdirs(curSearchPath->path, versionedModsPath(MODS_AUTOLOAD), PHYSFS_APPEND, use_override_mods ? &override_mods : nullptr, true);
-				addSubdirs(curSearchPath->path, versionedModsPath(MODS_CAMPAIGN), PHYSFS_APPEND, use_override_mods ? &override_mods : &campaign_mods, true);
-				if (!WZ_PHYSFS_unmount(curSearchPath->path))
+				addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_MUSIC), PHYSFS_APPEND, nullptr, false);
+				addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_GLOBAL), PHYSFS_APPEND, use_override_mods ? &override_mods : &global_mods, true);
+				addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_AUTOLOAD), PHYSFS_APPEND, use_override_mods ? &override_mods : nullptr, true);
+				addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_CAMPAIGN), PHYSFS_APPEND, use_override_mods ? &override_mods : &campaign_mods, true);
+				if (!WZ_PHYSFS_unmount(curSearchPath->path.c_str()))
 				{
-					debug(LOG_WZ, "* Failed to remove path %s again", curSearchPath->path);
+					debug(LOG_WZ, "* Failed to remove path %s again", curSearchPath->path.c_str());
 				}
 
 				// Add plain dir
-				PHYSFS_mount(curSearchPath->path, NULL, PHYSFS_APPEND);
+				WZ_PHYSFS_MountSearchPathWrapper(curSearchPath->path.c_str(), NULL, PHYSFS_APPEND);
+
+				if (terrainQualityOverrideBasePath.has_value() && !loadedTerrainTextureOverrides)
+				{
+					// Add terrain quality override files
+					tmpstr = curSearchPath->path + terrainQualityOverrideBasePath.value();
+					loadedTerrainTextureOverrides = WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND) || loadedTerrainTextureOverrides;
+					tmpstr += ".wz";
+					loadedTerrainTextureOverrides = WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND) || loadedTerrainTextureOverrides;
+					if (loadedTerrainTextureOverrides)
+					{
+						debug(LOG_INFO, "Loaded terrain overrides from: %s", curSearchPath->path.c_str());
+					}
+				}
 
 				// Add base files
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "base");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "base.wz");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-
-				curSearchPath = curSearchPath->higherPriority;
+				tmpstr = curSearchPath->path + "base";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
+				tmpstr = curSearchPath->path + "base.wz";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
 			}
 			break;
 		case mod_multiplay:
 			debug(LOG_WZ, "*** Switching to multiplay mods ***");
 			clearLoadedMods();
 
-			while (curSearchPath)
+			for (const auto& curSearchPath : searchPathRegistry)
 			{
 				// make sure videos override included files
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "sequences.wz");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-				curSearchPath = curSearchPath->higherPriority;
+				tmpstr = curSearchPath->path + "sequences.wz";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
 			}
 			// Add the selected map first, for mapmod support
 			if (current_map != nullptr)
@@ -529,12 +725,12 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
 					// mount it as a normal physical map path
 					WzString realPathAndDir = WzString::fromUtf8(PHYSFS_getRealDir(current_map)) + current_map;
 					realPathAndDir.replace("/", PHYSFS_getDirSeparator()); // Windows fix
-					PHYSFS_mount(realPathAndDir.toUtf8().c_str(), NULL, PHYSFS_APPEND);
+					WZ_PHYSFS_MountSearchPathWrapper(realPathAndDir.toUtf8().c_str(), current_map_mount_point, PHYSFS_APPEND);
 				}
 				else if (!inMemoryMapArchiveData.empty())
 				{
 					// mount the in-memory map archive as a virtual file
-					if (PHYSFS_mountMemory_fixed(inMemoryMapArchiveData.data(), inMemoryMapArchiveData.size(), clearInMemoryMapFile, inMemoryMapVirtualFilenameUID.c_str(), NULL, PHYSFS_APPEND) != 0)
+					if (PHYSFS_mountMemory_fixed(inMemoryMapArchiveData.data(), inMemoryMapArchiveData.size(), clearInMemoryMapFile, inMemoryMapVirtualFilenameUID.c_str(), current_map_mount_point, PHYSFS_APPEND) != 0)
 					{
 						inMemoryMapArchiveMounted++;
 					}
@@ -544,26 +740,21 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
 					debug(LOG_ERROR, "Specified virtual map file, but no data?");
 				}
 			}
-			curSearchPath = searchPathRegistry;
-			while (curSearchPath->lowerPriority)
-			{
-				curSearchPath = curSearchPath->lowerPriority;
-			}
-			while (curSearchPath)
+			for (const auto& curSearchPath : searchPathRegistry)
 			{
 #ifdef DEBUG
-				debug(LOG_WZ, "Adding [%s] to search path", curSearchPath->path);
+				debug(LOG_WZ, "Adding [%s] to search path", curSearchPath->path.c_str());
 #endif // DEBUG
 				// Add global and multiplay mods
-				PHYSFS_mount(curSearchPath->path, NULL, PHYSFS_APPEND);
-				addSubdirs(curSearchPath->path, versionedModsPath(MODS_MUSIC), PHYSFS_APPEND, nullptr, false);
+				WZ_PHYSFS_MountSearchPathWrapper(curSearchPath->path.c_str(), NULL, PHYSFS_APPEND);
+				addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_MUSIC), PHYSFS_APPEND, nullptr, false);
 
 				// Only load if we are host or singleplayer (Initial mod load relies on this, too)
 				if (ingame.side == InGameSide::HOST_OR_SINGLEPLAYER || !NetPlay.bComms)
 				{
-					addSubdirs(curSearchPath->path, versionedModsPath(MODS_GLOBAL), PHYSFS_APPEND, use_override_mods ? &override_mods : &global_mods, true);
-					addSubdirs(curSearchPath->path, versionedModsPath(MODS_AUTOLOAD), PHYSFS_APPEND, use_override_mods ? &override_mods : nullptr, true);
-					addSubdirs(curSearchPath->path, versionedModsPath(MODS_MULTIPLAY), PHYSFS_APPEND, use_override_mods ? &override_mods : &multiplay_mods, true);
+					addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_GLOBAL), PHYSFS_APPEND, use_override_mods ? &override_mods : &global_mods, true);
+					addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_AUTOLOAD), PHYSFS_APPEND, use_override_mods ? &override_mods : nullptr, true);
+					addSubdirs(curSearchPath->path.c_str(), versionedModsPath(MODS_MULTIPLAY), PHYSFS_APPEND, use_override_mods ? &override_mods : &multiplay_mods, true);
 				}
 				else
 				{
@@ -571,31 +762,38 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
 					for (Sha256 &hash : game.modHashes)
 					{
 						hashList = {hash.toString()};
-						addSubdirs(curSearchPath->path, "mods/downloads", PHYSFS_APPEND, &hashList, true); // not versioned
+						addSubdirs(curSearchPath->path.c_str(), "mods/downloads", PHYSFS_APPEND, &hashList, true); // not versioned
 					}
 				}
-				WZ_PHYSFS_unmount(curSearchPath->path);
+				WZ_PHYSFS_unmount(curSearchPath->path.c_str());
 
 				// Add multiplay patches
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "mp");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "mp.wz");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
+				tmpstr = curSearchPath->path + "mp";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
+				tmpstr = curSearchPath->path + "mp.wz";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
 
 				// Add plain dir
-				PHYSFS_mount(curSearchPath->path, NULL, PHYSFS_APPEND);
+				WZ_PHYSFS_MountSearchPathWrapper(curSearchPath->path.c_str(), NULL, PHYSFS_APPEND);
+
+				if (terrainQualityOverrideBasePath.has_value() && !loadedTerrainTextureOverrides)
+				{
+					// Add terrain quality override files
+					tmpstr = curSearchPath->path + terrainQualityOverrideBasePath.value();
+					loadedTerrainTextureOverrides = WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND) || loadedTerrainTextureOverrides;
+					tmpstr += ".wz";
+					loadedTerrainTextureOverrides = WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND) || loadedTerrainTextureOverrides;
+					if (loadedTerrainTextureOverrides)
+					{
+						debug(LOG_INFO, "Loaded terrain overrides from: %s", curSearchPath->path.c_str());
+					}
+				}
 
 				// Add base files
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "base");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-				sstrcpy(tmpstr, curSearchPath->path);
-				sstrcat(tmpstr, "base.wz");
-				PHYSFS_mount(tmpstr, NULL, PHYSFS_APPEND);
-
-				curSearchPath = curSearchPath->higherPriority;
+				tmpstr = curSearchPath->path + "base";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
+				tmpstr = curSearchPath->path + "base.wz";
+				WZ_PHYSFS_MountSearchPathWrapper(tmpstr.c_str(), NULL, PHYSFS_APPEND);
 			}
 			break;
 		default:
@@ -608,24 +806,30 @@ bool rebuildSearchPath(searchPathMode mode, bool force, const char *current_map)
 			{
 				debug(LOG_POPUP, _("The required mod could not be loaded: %s\n\nWarzone will try to load the game without it."), override_mod_list.c_str());
 			}
-			clearOverrideMods();
-			current_mode = mod_override;
 		}
 
 		// User's home dir must be first so we always see what we write
 		WZ_PHYSFS_unmount(PHYSFS_getWriteDir());
-		PHYSFS_mount(PHYSFS_getWriteDir(), NULL, PHYSFS_PREPEND);
+		WZ_PHYSFS_MountSearchPathWrapper(PHYSFS_getWriteDir(), NULL, PHYSFS_PREPEND);
 
 #ifdef DEBUG
 		printSearchPath();
 #endif // DEBUG
 
+		if (mode != mod_clean)
+		{
+			gfx_api::loadTextureCompressionOverrides(); // reload these as mods may have overridden the file!
+		}
+
+		if (terrainQualityOverrideBasePath.has_value() && (mode == mod_campaign || mode == mod_multiplay))
+		{
+			if (!loadedTerrainTextureOverrides)
+			{
+				debug(LOG_INFO, "Failed to load expected terrain quality overrides: %s", (terrainQualityOverrideBasePath.value().c_str()));
+			}
+		}
+
 		ActivityManager::instance().rebuiltSearchPath();
-	}
-	else if (use_override_mods)
-	{
-		// override mods are already the same as current mods, so no need to do anything
-		clearOverrideMods();
 	}
 	return true;
 }
@@ -675,18 +879,34 @@ static MapFileList listMapFiles()
 		std::string realFilePathAndName = PHYSFS_getWriteDir() + realFileName.platformDependent;
 		if (PHYSFS_mount(realFilePathAndName.c_str(), NULL, PHYSFS_APPEND))
 		{
-			int unsafe = 0;
-			bool enumSuccess = WZ_PHYSFS_enumerateFiles("multiplay/maps", [&unsafe, &realFilePathAndName](const char *file) -> bool {
-				std::string isDir = std::string("multiplay/maps/") + file;
+			size_t numMapGamFiles = 0;
+			size_t numMapFolders = 0;
+			const std::string baseMapsPath("multiplay/maps/");
+			bool enumSuccess = WZ_PHYSFS_enumerateFiles("multiplay/maps", [&numMapGamFiles, &numMapFolders, &baseMapsPath, &realFilePathAndName](const char *file) -> bool {
+				if (!file)
+				{
+					return true; // continue
+				}
+				std::string isDir = baseMapsPath + file;
 				if (WZ_PHYSFS_isDirectory(isDir.c_str()))
 				{
+					if (baseMapsPath.size() == isDir.size())
+					{
+						// for some reason, file is an empty string - just skip
+						return true; // continue;
+					}
+					if (++numMapFolders > 1)
+					{
+						debug(LOG_ERROR, "Map packs are not supported! %s NOT added.", realFilePathAndName.c_str());
+						return false; // break;
+					}
 					return true; // continue;
 				}
 				std::string checkfile = file;
 				debug(LOG_WZ, "checking ... %s", file);
 				if (checkfile.substr(checkfile.find_last_of('.') + 1) == "gam")
 				{
-					if (unsafe++ > 1)
+					if (++numMapGamFiles > 1)
 					{
 						debug(LOG_ERROR, "Map packs are not supported! %s NOT added.", realFilePathAndName.c_str());
 						return false; // break;
@@ -698,9 +918,10 @@ static MapFileList listMapFiles()
 			{
 				// Failed to enumerate contents - corrupt map archive (ignore it)
 				debug(LOG_ERROR, "Failed to enumerate - ignoring corrupt map file: %s", realFilePathAndName.c_str());
-				unsafe = std::numeric_limits<int>::max() - 1;
+				numMapGamFiles = std::numeric_limits<size_t>::max() - 1;
+				numMapFolders = std::numeric_limits<size_t>::max() - 1;
 			}
-			if (unsafe < 2)
+			if (numMapGamFiles < 2 && numMapFolders < 2)
 			{
 				filtered.push_back(realFileName);
 			}
@@ -781,22 +1002,19 @@ static inline optional<WZmapInfo> CheckInMap(const char *archive, const std::str
 			lookin.append("/");
 			lookin.append(lookin_subdir);
 		}
-		bool enumResult = WZ_PHYSFS_enumerateFiles(lookin.c_str(), [&](const char *file) -> bool {
+		bool enumResult = WZ_PHYSFS_enumerateFolders(lookin, [&](const char *file) -> bool {
 			std::string checkfile = file;
-			if (WZ_PHYSFS_isDirectory((lookin + "/" + checkfile).c_str()))
+			if (checkfile.compare("wrf") == 0 || checkfile.compare("stats") == 0 || checkfile.compare("components") == 0
+				|| checkfile.compare("effects") == 0 || checkfile.compare("messages") == 0
+				|| checkfile.compare("audio") == 0 || checkfile.compare("sequenceaudio") == 0 || checkfile.compare("misc") == 0
+				|| checkfile.compare("features") == 0 || checkfile.compare("script") == 0 || checkfile.compare("structs") == 0
+				|| checkfile.compare("tileset") == 0 || checkfile.compare("images") == 0 || checkfile.compare("texpages") == 0
+				|| checkfile.compare("skirmish") == 0 || checkfile.compare("shaders") == 0 || checkfile.compare("fonts") == 0
+				|| checkfile.compare("icons") == 0)
 			{
-				if (checkfile.compare("wrf") == 0 || checkfile.compare("stats") == 0 || checkfile.compare("components") == 0
-					|| checkfile.compare("effects") == 0 || checkfile.compare("messages") == 0
-					|| checkfile.compare("audio") == 0 || checkfile.compare("sequenceaudio") == 0 || checkfile.compare("misc") == 0
-					|| checkfile.compare("features") == 0 || checkfile.compare("script") == 0 || checkfile.compare("structs") == 0
-					|| checkfile.compare("tileset") == 0 || checkfile.compare("images") == 0 || checkfile.compare("texpages") == 0
-					|| checkfile.compare("skirmish") == 0 || checkfile.compare("shaders") == 0 || checkfile.compare("fonts") == 0
-					|| checkfile.compare("icons") == 0)
-				{
-					debug(LOG_WZ, "Detected: %s %s" , archive, checkfile.c_str());
-					mapmod = true;
-					return false; // break;
-				}
+				debug(LOG_WZ, "Detected: %s %s" , archive, checkfile.c_str());
+				mapmod = true;
+				return false; // break;
 			}
 			return true; // continue
 		});
@@ -850,8 +1068,48 @@ bool processMap(const char* archive, const char* realFileName_platformIndependen
 		return false;
 	}
 
+	WzMapPhysFSIO mapIO;
+
 	bool containsMap = false;
-	bool enumSuccess = WZ_PHYSFS_enumerateFiles(mountPoint.c_str(), [&](const char *file) -> bool {
+
+	// First pass: Look for new level.json (which are in multiplay/maps/<map name>)
+	std::string mapsDirPath = mapIO.pathJoin(mountPoint.c_str(), "multiplay/maps");
+	bool enumSuccess = WZ_PHYSFS_enumerateFolders(mapsDirPath, [&](const char *folder) -> bool {
+		if (!folder) { return true; }
+		if (*folder == '\0') { return true; }
+
+		std::string levelJSONPath = std::string("multiplay/maps/") + folder + "/level.json";
+		if (PHYSFS_exists(WzString::fromUtf8(mountPoint + "/" + levelJSONPath)) && loadLevFile_JSON(mountPoint, levelJSONPath, mod_multiplay, realFileName_platformIndependent))
+		{
+			containsMap = true;
+			return false; // stop enumerating
+		}
+		return true;
+	});
+	if (!enumSuccess)
+	{
+		// Failed to enumerate contents - corrupt map archive
+		return false;
+	}
+
+	// Or "flattened" self-contained maps (where level.json is in the root)
+	if (!containsMap)
+	{
+		if (PHYSFS_exists(WzString::fromUtf8(mountPoint + "/" + "level.json")) && loadLevFile_JSON(mountPoint, "level.json", mod_multiplay, realFileName_platformIndependent))
+		{
+			containsMap = true;
+		}
+	}
+
+	if (containsMap)
+	{
+		std::string MapName = realFileName_platformIndependent;
+		WZ_Maps.insert(WZMapInfo_Map::value_type(MapName, WZmapInfoResult.value()));
+		return true;
+	}
+
+	// Second pass: Look for older / classic maps (with *.addon.lev / *.xplayers.lev in the root)
+	enumSuccess = WZ_PHYSFS_enumerateFiles(mountPoint.c_str(), [&](const char *file) -> bool {
 		size_t len = strlen(file);
 		if ((len > 10 && !strcasecmp(file + (len - 10), ".addon.lev"))  // Do not add addon.lev again // <--- Err, what? The code has loaded .addon.lev for a while...
 			|| (len > 13 && !strcasecmp(file + (len - 13), ".xplayers.lev"))) // add support for X player maps using a new name to prevent conflicts.
@@ -866,22 +1124,20 @@ bool processMap(const char* archive, const char* realFileName_platformIndependen
 		return true; // continue
 	});
 
-	if (!containsMap)
-	{
-		// not sure what this is, but it doesn't seem to contain a map
-		return false;
-	}
-
 	if (!enumSuccess)
 	{
 		// Failed to enumerate contents - corrupt map archive
 		return false;
 	}
 
-	std::string MapName = realFileName_platformIndependent;
-	WZ_Maps.insert(WZMapInfo_Map::value_type(MapName, WZmapInfoResult.value()));
+	if (containsMap)
+	{
+		std::string MapName = realFileName_platformIndependent;
+		WZ_Maps.insert(WZMapInfo_Map::value_type(MapName, WZmapInfoResult.value()));
+		return true;
+	}
 
-	return true;
+	return false;
 }
 
 #if defined(HAS_PHYSFS_IO_SUPPORT)
@@ -938,18 +1194,25 @@ bool setSpecialInMemoryMap(std::vector<uint8_t>&& mapArchiveData)
 }
 #endif
 
-bool buildMapList()
+bool buildMapList(bool campaignOnly)
 {
 	if (!loadLevFile("gamedesc.lev", mod_campaign, false, nullptr))
 	{
 		return false;
 	}
-	loadLevFile("addon.lev", mod_multiplay, false, nullptr);
+	if (!campaignOnly)
+	{
+		loadLevFile("addon.lev", mod_multiplay, false, nullptr);
+	}
 	WZ_Maps.clear();
 	if (!inMemoryMapArchiveMounted && !inMemoryMapArchiveData.empty())
 	{
 		debug(LOG_INFO, "Clearing in-memory map archive (since it isn't currently loaded)");
 		clearInMemoryMapFile(inMemoryMapArchiveData.data());
+	}
+	if (campaignOnly)
+	{
+		return true;
 	}
 	MapFileList realFileNames = listMapFiles();
 	for (auto &realFileName : realFileNames)
@@ -987,7 +1250,7 @@ bool buildMapList()
 // ////////////////////////////////////////////////////////////////////////////
 // Called once on program startup.
 //
-bool systemInitialise(float horizScaleFactor, float vertScaleFactor)
+bool systemInitialise(unsigned int horizScalePercentage, unsigned int vertScalePercentage)
 {
 	if (!widgInitialise())
 	{
@@ -1028,11 +1291,13 @@ bool systemInitialise(float horizScaleFactor, float vertScaleFactor)
 
 	// Initialize the iVis text rendering module
 	wzSceneBegin("Main menu loop");
-	iV_TextInit(horizScaleFactor, vertScaleFactor);
+	iV_TextInit(horizScalePercentage, vertScalePercentage);
 
 	pie_InitRadar();
 
 	readAIs();
+
+	initTerrainShaderType();
 
 	return true;
 }
@@ -1075,7 +1340,7 @@ void systemShutdown()
 	debug(LOG_MAIN, "shutting down CD audio");
 	cdAudio_Close();
 
-	if (audio_Disabled() == false && !audio_Shutdown())
+	if (!audio_Disabled() && !audio_Shutdown())
 	{
 		debug(LOG_FATAL, "Unable to audio_Shutdown() cleanly!");
 		abort();
@@ -1087,6 +1352,7 @@ void systemShutdown()
 	widgShutDown();
 	fpathShutdown();
 	mapShutdown();
+	modelShutdown();
 	debug(LOG_MAIN, "shutting down everything else");
 	pal_ShutDown();		// currently unused stub
 	frameShutDown();	// close screen / SDL / resources / cursors / trig
@@ -1201,9 +1467,11 @@ bool frontendShutdown()
 		closeLoadSaveOnShutdown(); // TODO: Ideally this would not be required here (refactor loadsave.cpp / frontend.cpp?)
 	}
 	interfaceShutDown();
+	shutdownGameGuide();
 
 	//do this before shutting down the iV library
 	resReleaseAllData();
+	frontendIsShuttingDown();
 
 	if (!objShutdown())
 	{
@@ -1275,6 +1543,11 @@ bool stageOneInitialise()
 		return false;
 	}
 
+	if (!formationInitialise())		// Initialise the formation system
+	{
+		return false;
+	}
+
 	// initialise the visibility stuff
 	if (!visInitialise())
 	{
@@ -1299,6 +1572,8 @@ bool stageOneInitialise()
 	transitionInit();
 	resetScroll();
 
+	strategyPlansInit();
+
 	return true;
 }
 
@@ -1315,10 +1590,12 @@ bool stageOneShutDown()
 
 	pie_FreeShaders();
 
-	if (audio_Disabled() == false)
+	if (!audio_Disabled())
 	{
 		sound_CheckAllUnloaded();
 	}
+
+	shutdownGameGuide();
 
 	proj_Shutdown();
 
@@ -1335,6 +1612,8 @@ bool stageOneShutDown()
 	}
 
 	grpShutDown();
+
+	formationShutDown();
 
 	ResearchRelease();
 
@@ -1354,11 +1633,30 @@ bool stageOneShutDown()
 	modelShutdown();
 	pie_TexShutDown();
 
+	bool needsLevReload = (hasOverrideMods() || hasCampaignMods()) && (game.type == LEVEL_TYPE::CAMPAIGN);
+	clearOverrideMods();
+	clearCampaignMods();
+	clearCamTweakOptions();
+
 	// Use mod_multiplay as the default (campaign might have set it to mod_singleplayer)
 	rebuildSearchPath(mod_multiplay, true);
+
+	if (needsLevReload)
+	{
+		// Clear & reload level list
+		levShutDown();
+		levInitialise();
+		pal_Init(); // Update palettes.
+		if (!buildMapList(false))
+		{
+			debug(LOG_FATAL, "Failed to rebuild map / level list?");
+		}
+	}
+
 	pie_TexInit(); // restart it
 
 	initMiscVars();
+	reinitFactionsMapping();
 	wzSceneEnd("Main game loop");
 	wzSceneBegin("Main menu loop");
 
@@ -1450,7 +1748,7 @@ bool stageTwoInitialise()
 		{
 			NETinitQueue(NETgameQueue(i));
 
-			if (!myResponsibility(i))
+			if (!myResponsibility(i) || !NetPlay.bComms)
 			{
 				NETsetNoSendOverNetwork(NETgameQueue(i));
 			}
@@ -1479,6 +1777,8 @@ bool stageTwoShutDown()
 {
 	debug(LOG_WZ, "== stageTwoShutDown ==");
 
+	shutdown3DView_FullReset();
+
 	fpathShutdown();
 
 	cdAudio_Stop();
@@ -1498,12 +1798,6 @@ bool stageTwoShutDown()
 		return false;
 	}
 
-
-	if (!ShutdownRadar())
-	{
-		return false;
-	}
-
 	interfaceShutDown();
 
 	cmdDroidShutDown();
@@ -1516,9 +1810,59 @@ bool stageTwoShutDown()
 		return false;
 	}
 
-	shutdown3DView();
+	clearCampaignName();
 
 	return true;
+}
+
+static void displayLoadingErrors()
+{
+	std::vector<std::string> loadingErrors;
+
+	// warn the user if a mod might have corrupted models / files
+	auto modelLoadingErrorCount = getModelLoadingErrorCount();
+	if (modelLoadingErrorCount > 0)
+	{
+		debug(LOG_INFO, "Failure to load %zu game model(s) - please remove any outdated or broken mods", modelLoadingErrorCount);
+		loadingErrors.push_back(astringf(_("Failure to load %zu game model(s)"), modelLoadingErrorCount));
+	}
+	auto modelTextureLoadingFailures = getModelTextureLoadingFailuresCount();
+	if (modelTextureLoadingFailures > 0)
+	{
+		debug(LOG_INFO, "Failed to load textures for %zu models - please remove any outdated or broken mods", modelTextureLoadingFailures);
+		loadingErrors.push_back(astringf(_("Failure to load textures for %zu model(s)"), modelTextureLoadingFailures));
+	}
+	auto statModelLoadingFailures = getStatModelLoadingFailures();
+	if (statModelLoadingFailures > 0)
+	{
+		debug(LOG_INFO, "Failed to load model for %zu stats entries - please remove any outdated or broken mods", statModelLoadingFailures);
+		loadingErrors.push_back(astringf(_("Failure to load model for %zu stat(s)"), statModelLoadingFailures));
+	}
+
+	if (!loadingErrors.empty())
+	{
+		std::string modelErrorDescription = _("Warzone 2100 encountered error(s) loading game data:");
+		for (const auto& error : loadingErrors)
+		{
+			modelErrorDescription += "\n";
+			modelErrorDescription += "- ";
+			modelErrorDescription += error;
+		}
+		modelErrorDescription += "\n\n";
+		if (!getLoadedMods().empty())
+		{
+			modelErrorDescription += _("Please try removing any new mods - they may have issues or be incompatible with this version.");
+			modelErrorDescription += "\n\n";
+			modelErrorDescription += _("Loaded mod(s):");
+			modelErrorDescription += "\n";
+			modelErrorDescription += std::string("- ") + getModList();
+		}
+		else
+		{
+			modelErrorDescription += _("Base game files may be corrupt or outdated - please try reinstalling the game.");
+		}
+		wzDisplayDialog(Dialog_Error, _("Error Loading Game Data"), modelErrorDescription.c_str());
+	}
 }
 
 bool stageThreeInitialise()
@@ -1528,6 +1872,17 @@ bool stageThreeInitialise()
 	debug(LOG_WZ, "== stageThreeInitialise ==");
 
 	loopMissionState = LMS_NORMAL;
+
+	// preload model textures for current tileset
+	size_t modelTilesetIdx = static_cast<size_t>(currentMapTileset);
+	modelUpdateTilesetIdx(modelTilesetIdx);
+	enumerateLoadedModels([](const std::string &modelName, iIMDBaseShape &s){
+		for (iIMDShape *pDisplayShape = s.displayModel(); pDisplayShape != nullptr; pDisplayShape = pDisplayShape->next.get())
+		{
+			pDisplayShape->getTextures();
+		}
+	});
+	resDoResLoadCallback();		// do callback.
 
 	if (!InitRadar()) 	// After resLoad cause it needs the game palette initialised.
 	{
@@ -1545,6 +1900,7 @@ bool stageThreeInitialise()
 	effectResetUpdates();
 	initLighting(0, 0, mapWidth, mapHeight);
 	pie_InitLighting();
+	getCurrentLightmapData().reset(mapWidth, mapHeight);
 
 	if (fromSave)
 	{
@@ -1589,6 +1945,8 @@ bool stageThreeInitialise()
 		challengeActive = true;
 	}
 
+	// add radar to interface screen, and resize
+	intAddRadarWidget();
 	resizeRadar();
 
 	setAllPauseStates(false);
@@ -1597,21 +1955,42 @@ bool stageThreeInitialise()
 
 	if (getLevelLoadType() == GTYPE_SAVE_MIDMISSION || getLevelLoadType() == GTYPE_SAVE_START)
 	{
-		triggerEvent(TRIGGER_GAME_LOADED);
+		executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_GAME_LOADED); });
 	}
 	else
 	{
+		initNoGoAreas();
+
 		const DebugInputManager& dbgInputManager = gInputManager.debugManager();
 		if (dbgInputManager.debugMappingsAllowed())
 		{
+			Cheated = true;
 			triggerEventCheatMode(true);
+			gInputManager.contexts().set(InputContext::DEBUG_MISC, InputContext::State::ACTIVE);
 		}
-		triggerEvent(TRIGGER_GAME_INIT);
+
+		executeFnAndProcessScriptQueuedRemovals([]() { triggerEvent(TRIGGER_GAME_INIT); });
 		playerBuiltHQ = structureExists(selectedPlayer, REF_HQ, true, false);
 	}
 
 	// Start / randomize in-game music
 	cdAudio_PlayTrack(SONG_INGAME);
+
+	// always start off with a refresh of the groups UI data
+	intGroupsChanged();
+
+	// warn the user if a mod might have corrupted models / files
+	displayLoadingErrors();
+
+	if (bMultiPlayer)
+	{
+		cameraToHome(selectedPlayer, false, fromSave);
+		playerResponding(); // say howdy!
+		if (NetPlay.bComms && !NETisReplay())
+		{
+			multiStartScreenInit();
+		}
+	}
 
 	return true;
 }
@@ -1623,7 +2002,7 @@ bool stageThreeShutDown()
 {
 	debug(LOG_WZ, "== stageThreeShutDown ==");
 
-	setHostLaunch(HostLaunch::Normal);
+	resetHostLaunch();
 
 	removeSpotters();
 
@@ -1647,6 +2026,11 @@ bool stageThreeShutDown()
 	// make sure any button tips are gone.
 	widgReset();
 
+	if (!ShutdownRadar())
+	{
+		debug(LOG_FATAL, "Failed to shutdown radar");
+	}
+
 	audio_StopAll();
 
 	if (bMultiPlayer)
@@ -1661,6 +2045,8 @@ bool stageThreeShutDown()
 	}
 
 	setScriptWinLoseVideo(PLAY_NONE);
+
+	shutdown3DView();
 
 	return true;
 }

@@ -129,6 +129,19 @@ WzString WzString::fromUtf16(const std::vector<uint16_t>& utf16)
 	return WzString(utf8str);
 }
 
+WzString WzString::fromUtf32(const std::vector<uint32_t>& utf32)
+{
+	std::string utf8str;
+	try {
+		utf8::utf32to8(utf32.begin(), utf32.end(), back_inserter(utf8str));
+	}
+	catch (const std::exception &e) {
+		ASSERT(false, "Conversion from UTF32 failed with error: %s", e.what());
+		utf8str.clear();
+	}
+	return WzString(utf8str);
+}
+
 bool WzString::isValidUtf8(const char * str, size_t len)
 {
 	return utf8::is_valid(str, str + len);
@@ -201,6 +214,15 @@ WzString WzString::substr(size_t start, size_t length) const
 
 	auto end = begin;
 	_utf8_advance(end, length, _utf8String.end());
+	return WzString(std::string(begin, end));
+}
+
+WzString WzString::substr(size_t start) const
+{
+	auto begin = _utf8String.begin();
+	_utf8_advance(begin, start, _utf8String.end());
+
+	auto end = _utf8String.end();
 	return WzString(std::string(begin, end));
 }
 
@@ -343,6 +365,19 @@ void WzString::truncate(int position)
 	}
 }
 
+bool WzString::pop_back()
+{
+	if (_utf8String.empty()) { return false; }
+	auto it = _utf8String.end();
+	_utf8_advance(it, -1, _utf8String.begin());
+	if (it != _utf8String.end())
+	{
+		_utf8String.erase(it, _utf8String.end());
+		return true;
+	}
+	return false; // something went wrong?
+}
+
 void WzString::clear()
 {
 	_utf8String.clear();
@@ -437,6 +472,10 @@ std::vector<WzString> WzString::split(const WzString & delimiter) const
 WzString WzString::normalized(WzString::NormalizationForm mode) const
 {
 	static_assert(std::is_same<unsigned char, utf8proc_uint8_t>::value, "uint8_t is not unsigned char. This function requires this to avoid a violation of the strict aliasing rule.");
+	if (_utf8String.empty())
+	{
+		return WzString();
+	}
 	// The reinterpret_cast from char* to const uint8_t* is only safe when std::uint8_t is *not* implemented as an extended unsigned integer type.
 	// See: https://stackoverflow.com/a/16261758
 	utf8proc_uint8_t *result = utf8proc_NFKD(reinterpret_cast<const utf8proc_uint8_t*>(_utf8String.c_str()));
